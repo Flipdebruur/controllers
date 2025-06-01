@@ -1,6 +1,3 @@
-# Implements communication with Webots via Serial over USB.
-# Works with the "line_following_with_HIL" controller in Webots.
-
 from machine import Pin, UART
 from time import sleep
 # import ulab
