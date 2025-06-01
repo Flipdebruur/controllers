@@ -14,6 +14,9 @@ LineRight = False
 
 delta_t = TIME_STEP/1000.0 
 
+# Initialize pose and encoders
+x, y, phi = 0.04, 0.44, 0.0
+
 # e-puck Physical parameters for the kinematics model (constants)
 R = 0.020    # radius of the wheels: 20.5mm [m]
 D = 0.057    # distance between the wheels: 52mm [m]
@@ -21,13 +24,32 @@ D = 0.057    # distance between the wheels: 52mm [m]
 A = 0.05
 
 
-#def get_robot_pose(self, u, w, x_old, y_old, phi_old, delta_t):
+
+def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
+    """Computes speed of the wheels based on encoder readings"""
+    wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
+    wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
+    return [wl, wr]
+
+
+def get_robot_speeds(wl, wr, r, d):
+    """Computes robot linear and angular speeds"""
+    u = (r / 2) * (wl + wr)  # linear speed [m/s]
+    w = (r / d) * (wr - wl)  # angular speed [rad/s]
+    return [u, w]
+
+
+
+def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
+    """Updates robot pose based on heading and linear and angular speeds"""
+    x = x_old + u * math.cos(phi_old) * delta_t
+    y = y_old + u * math.sin(phi_old) * delta_t
+    phi = phi_old + w * delta_t
+    return [x, y, phi]
+
 class Lab2Bot(Robot):
     def __init__(self):
         super().__init__()
-        self.x = 0.0
-        self.y = 0.0
-        self.phi = 0.0
         self.left_motor = self.getDevice("left wheel motor")
         self.right_motor = self.getDevice("right wheel motor")
         self.left_motor.setPosition(float('inf'))
@@ -46,46 +68,6 @@ class Lab2Bot(Robot):
         self.gs = [self.getDevice(f"gs{i}") for i in range(3)]
         for sensor in self.gs:
             sensor.enable(TIME_STEP)  # <-- Enable ground sensors
-
-        self.encoder = []
-        self.encoderNames = ['left wheel sensor', 'right wheel sensor']
-        for i in range(2):
-            self.encoder.append(self.getDevice(self.encoderNames[i]))
-            self.encoder[i].enable(TIME_STEP)  # <-- Enable encoders
-        self.oldEncoderValues = [enc.getValue() for enc in self.encoder]
-
-        leftMotor = self.getDevice('left wheel motor')
-        rightMotor = self.getDevice('right wheel motor')
-        leftMotor.setPosition(float('inf'))
-        rightMotor.setPosition(float('inf'))
-        leftMotor.setVelocity(0.0)
-        rightMotor.setVelocity(0.0)
-
-    def update_encoders(self, delta_t):
-        encoderValues = [enc.getValue() for enc in self.encoder]
-        wl, wr = self.get_wheel_speeds(encoderValues, self.oldEncoderValues, delta_t)
-        self.oldEncoderValues = encoderValues.copy()
-        return wl, wr
-
-    def get_wheel_speeds(self, encoderValues, oldEncoderValues, delta_t):
-        delta_left = encoderValues[0] - oldEncoderValues[0]
-        delta_right = encoderValues[1] - oldEncoderValues[1]
-        wl = (delta_left / delta_t) * (2 * math.pi / 360)
-        wr = (delta_right / delta_t) * (2 * math.pi / 360)
-        return wl, wr
-
-    def get_robot_speeds(self, wl, wr):
-        u = (R * wl + R * wr) / 2.0
-        w = (R * wl - R * wr) / D
-        return u, w
-
-    def update_pose(self, u, w, delta_t):
-        self.x += u * delta_t * math.cos(self.phi)
-        self.y += u * delta_t * math.sin(self.phi)
-        self.phi += w * delta_t
-
-    def get_pose(self):
-        return self.x, self.y, self.phi
 
   
     def read_psensors(self):
@@ -169,20 +151,19 @@ class Lab2Bot(Robot):
             self.right_motor.setVelocity(0.1 * MAX_SPEED)
             if self.step(TIME_STEP) == -1:
                 break
-
+# Initialize robot and devices
 bot = Lab2Bot()
+encoder = []
+encoderNames = ['left wheel sensor', 'right wheel sensor']
+for i in range(2):
+    encoder.append(bot.getDevice(encoderNames[i]))
+    encoder[i].enable(TIME_STEP)
+
+bot.step(TIME_STEP)
+encoderValues = [enc.getValue() for enc in encoder]
+oldEncoderValues = encoderValues.copy()
+
 while bot.step(TIME_STEP) != -1:
-    wl, wr = bot.update_encoders(delta_t)
-    u, w = bot.get_robot_speeds(wl, wr)
-    bot.update_pose(u, w, delta_t)
-    x, y, phi = bot.get_pose()
-
-    if any(math.isnan(val) for val in [x, y, phi, u, w, wl, wr]):
-        print("NaN detected in pose or speeds!")
-
-
-    print(f'Sim time: {bot.getTime():.3f}  Pose: x={x:.2f} m, y={y:.2f} m, phi={phi:.4f} rad.')
-
     bot.read_psensors()
     bot.Line_search()
     psValues = bot.psValues
@@ -201,3 +182,24 @@ while bot.step(TIME_STEP) != -1:
         bot.moveright()
     else:
         bot.forward()
+
+    # Update encoder values
+    encoderValues = [enc.getValue() for enc in encoder]
+    print(f"Encoder values: {encoderValues}")
+    print(f"Old encoder values: {oldEncoderValues}")
+    print(f"delta_t: {delta_t}")
+    # Compute speed of the wheels
+    [wl, wr] = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
+
+    # Compute robot linear and angular speeds
+    [u, w] = get_robot_speeds(wl, wr, R, D)
+
+    # Compute new robot pose
+    [x, y, phi] = get_robot_pose(u, w, x, y, phi, delta_t)
+    if any(math.isnan(val) for val in [x, y, phi, wl, wr, u, w]):
+        print("NaN detected in pose or speeds!")
+        break
+    print(f"Odometry pose: x={x:.2f} m, y={y:.2f} m, phi={phi:.4f} rad.")
+
+    # Update old encoder values for next cycle
+    oldEncoderValues = encoderValues.copy()
