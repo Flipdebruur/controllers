@@ -73,23 +73,39 @@ rightMotor.setVelocity(0.0)
 
 def create_grid():
     grid = ([
-        [0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
-        [0, 1, 1, 1, 0, 0, 0, 1, 0, 0],
-        [0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-        [0, 0, 0, 1, 0, 1, 1, 1, 0, 0],
-        [0, 1, 0, 0, 0, 0, 0, 1, 0, 0],
-        [0, 1, 1, 1, 1, 1, 0, 1, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
-        [0, 0, 1, 1, 1, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 1, 1, 1, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    ])
+        [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0]
+        ])
     return grid
 
 grid = create_grid()
+
 def create_costs():
     costs = [
-        [1 for _ in range(10)] for _ in range(10)
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,]
     ]
     return costs
 
@@ -111,28 +127,10 @@ def plot_grid(grid, costs, path=None):
             j.append(y)
         plt.plot(j, i, 'r')
     plt.title("Map of the Environment")
-
-    # Anootate costs
-    rows = len(grid)
-    cols = len(grid[0])
-    for i in range(rows):
-        for j in range(cols):
-            if grid[i][j] == 0:
-                plt.text(j, i, f'{costs[i][j]}', ha='center', va='center', color=('lightgray'), fontsize=10)
-
-    if path:
-        i = []
-        j = []
-        for (x, y) in path:
-            plt.scatter(y, x, color="red")
-            i.append(x)
-            j.append(y)
-        plt.plot(j,i, 'r')
-    plt.title("Map of the Environment")
-    # plt.grid(True)
     plt.show()
 grid = create_grid()
-plot_grid(grid)
+
+
 
 def dijkstra(grid, costs, start, goal):
     """
@@ -198,11 +196,15 @@ def dijkstra(grid, costs, start, goal):
 # perform simulation steps until Webots is stopping the controller
 # Implements the see-think-act cycle
 # Example usage (outside the main loop)
+
+
 costs = create_costs()
 start = (0, 0)
-goal = (9, 9)
+goal = (0, 2)
 path = dijkstra(grid, costs, start, goal)
 plot_grid(grid, costs, path)
+print("Shortest Path:", path)
+
 while robot.step(timestep) != -1:
 
     ############################################
@@ -251,15 +253,15 @@ while robot.step(timestep) != -1:
         leftSpeed = speed
         rightSpeed = speed
             
-    if current_state == 'turn_right':
+    elif current_state == 'turn_right':
         leftSpeed = 0.5 * speed
         rightSpeed = 0 * speed
 
-    if current_state == 'turn_left':
+    elif current_state == 'turn_left':
         leftSpeed = 0 * speed
         rightSpeed = 0.5 * speed
         
-    if current_state == 'stop':
+    elif current_state == 'stop':
         leftSpeed = 0.0
         rightSpeed = 0.0
  
