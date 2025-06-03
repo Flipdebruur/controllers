@@ -1,7 +1,6 @@
 from machine import Pin, UART
 from time import sleep
 import heapq
-import math
 
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
@@ -13,12 +12,8 @@ for i in range(5):
     sleep(0.5)
 led_board.value(0)  # Ensure LED is OFF at the end
 
-obstacle_detected = False
-
 # Now switch to UART1 for communication with Webots
 uart = UART(1, 115200, tx=1, rx=3)
-
-
 
 def create_grid():
     grid = ([
@@ -120,7 +115,6 @@ costs = create_costs()
 grid = create_grid()
 start = (0, 0)
 goal = (0, 2)
-path = dijkstra(grid, costs, start, goal)
 obstacle_pos = None # This should be set to the position of the obstacle when detected
 
 def pathfinder(obstacle_pos, costs, start, goal):
@@ -129,6 +123,10 @@ def pathfinder(obstacle_pos, costs, start, goal):
         if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
             costs[y][x] = 999
     return dijkstra(grid, costs, start, goal)
+
+#def at_intersection():
+
+obstacle_detected = False
 
 # Initial status of the line sensor: updated by Webots via serial
 line_left = False
@@ -142,44 +140,6 @@ COUNTER_MAX = 5
 COUNTER_STOP = 50
 state_updated = True
 
-x = 0.0  # Robot's x position
-y = 0.0  # Robot's y position
-phi = 0.0  # Robot's orientation in radians
-
-R = 0.020 # Wheel radius
-D = 0.057 # Wheel separation distance
-A = 0.05 # Distance from the center of the wheels to the point of interest
-
-delta_t = 0.02  # Time step for odometry calculations
-
-encoder = []
-encoderNames = ['left wheel sensor', 'right wheel sensor']
-for i in range(2):
-    encoder.append(Pin(i))
-oldEncoderValues = [0, 0]  # Initialize old encoder values
-
-# Odometry functions (From Lab3ctrl)
-def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
-    """Computes speed of the wheels based on encoder readings"""
-    wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
-    wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
-    return [wl, wr]
-
-def get_robot_speeds(wl, wr, r, d):
-    """Computes robot linear and angular speeds"""
-    u = (r / 2) * (wl + wr)  # linear speed [m/s]
-    w = (r / d) * (wr - wl)  # angular speed [rad/s]
-    return [u, w]
-
-def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
-    """Updates robot pose based on heading and linear and angular speeds"""
-    x = x_old + u * math.cos(phi_old) * delta_t
-    y = y_old + u * math.sin(phi_old) * delta_t
-    phi = phi_old + w * delta_t
-    return [x, y, phi]
-
-#path following variables
-current_path_index = 0 # Index of the current point in the path
 path = pathfinder(obstacle_pos, costs, start, goal)  # Initial path calculation
 turning = False
 
@@ -203,19 +163,8 @@ while True:
                 led_board.value(0)
                 sleep(0.1)
     ##################   Think   ###################
-    encoderValues = [enc.getValue() for enc in encoder]
-    [wl, wr] = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
-    [u, w] = get_robot_speeds(wl, wr, R, D)
-    [x, y, phi] = get_robot_pose(u, w, x, y, phi, delta_t)
-
-    oldEncoderValues = encoderValues.copy()
-
-    # Convert robot's position to grid coordinates
-    current_grid_x = int(x / 0.1)  # Assuming each grid cell is 0.1 meters wide
-    current_grid_y = int(y / 0.1)  # Assuming each grid cell is 0.1 meters high
-    current_grid_pos = (current_grid_y, current_grid_x)
-    if obstacle_detected:
-        path = pathfinder(obstacle_pos, costs, start, goal)
+    #if obstacle_detected:
+        #path = pathfinder(obstacle_pos, costs, start, goal)
     
     # Line Following Logic (Only active when not turning)
     if current_state == 'forward':
@@ -233,7 +182,6 @@ while True:
         if counter >= COUNTER_MAX:
             current_state = 'forward'
             state_updated = True
-            current_path_index += 1  # Move to the next point in the path
 
     elif current_state == 'stop':
         if counter >= COUNTER_STOP:
@@ -246,6 +194,6 @@ while True:
         state_updated = False
 
     counter += 1    # increment counter
-    sleep(0.09)     # wait 
+    sleep(0.02)     # wait 
    
 

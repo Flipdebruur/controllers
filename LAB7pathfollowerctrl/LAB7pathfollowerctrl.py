@@ -9,13 +9,8 @@
 
 
 from controller import Robot
-import math 
-import heapq
-import matplotlib.pyplot as plt
-
 #-------------------------------------------------------
 # Open serial port to communicate with the microcontroller
-
 import serial
 try:
     # Change the port parameter according to your system
@@ -69,6 +64,9 @@ rightMotor.setPosition(float('inf'))
 leftMotor.setVelocity(0.0)
 rightMotor.setVelocity(0.0)
 
+turn_left_counter = 0
+turn_right_counter = 0
+
 while robot.step(timestep) != -1:
 
     ############################################
@@ -92,7 +90,7 @@ while robot.step(timestep) != -1:
 
     Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
     
-    # Build the message to be sent to the ESP32 with the ground
+    # Build the message to be sent to the ESP32
     # sensor data: 0 = line detected; 1 = line not detected
     message = ''
     if line_left:
@@ -115,7 +113,6 @@ while robot.step(timestep) != -1:
     msg_bytes = bytes(message + '\n', 'UTF-8')
 
     #recieve the message from the microcontroller
-
     # Serial communication: if something is received, then update the current state
     if ser.in_waiting:
         value = str(ser.readline(), 'UTF-8').strip()
@@ -127,14 +124,40 @@ while robot.step(timestep) != -1:
         rightSpeed = speed
             
     elif current_state == 'turn_right':
-        print("Turning right")
-        leftSpeed = 0.5 * speed
-        rightSpeed = 0 * speed
+        leftSpeed = 0.3 * speed
+        rightSpeed = 0.1 * speed
 
+    elif current_state == '90_deg_right':
+        if turn_right_counter < 40:
+            leftSpeed = speed
+            rightSpeed = speed
+            turn_left_counter += 1
+        elif turn_left_counter < 160:
+            leftSpeed = 0.5 * speed
+            rightSpeed = 0 * speed
+            turn_left_counter += 1
+        else:
+            # After turning, go back to forward and reset counter
+            current_state = 'forward'
+            turn_left_counter = 0
+            
     elif current_state == 'turn_left':
-        print("Turning left")
-        leftSpeed = 0 * speed
-        rightSpeed = 0.5 * speed
+        leftSpeed = 0.1 * speed
+        rightSpeed = 0.3 * speed
+        
+    elif current_state == '90_deg_left':
+        if turn_left_counter < 40:
+            leftSpeed = speed
+            rightSpeed = speed
+            turn_left_counter += 1
+        elif turn_left_counter < 160:
+            leftSpeed = 0 * speed
+            rightSpeed = 0.5 * speed
+            turn_left_counter += 1
+        else:
+            # After turning, go back to forward and reset counter
+            current_state = 'forward'
+            turn_left_counter = 0
         
     elif current_state == 'stop':
         leftSpeed = 0.0
