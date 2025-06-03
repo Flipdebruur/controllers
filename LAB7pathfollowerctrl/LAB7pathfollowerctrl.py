@@ -9,10 +9,14 @@
 
 
 from controller import Robot
-import serial
+import math 
+import heapq
+import matplotlib.pyplot as plt
+
 #-------------------------------------------------------
 # Open serial port to communicate with the microcontroller
 
+import serial
 try:
     # Change the port parameter according to your system
     ser =  serial.Serial(port='COM7', baudrate=115200, timeout=5) 
@@ -42,6 +46,14 @@ current_state = 'forward'
 #-------------------------------------------------------
 # Initialize devices
 
+# proximity sensors
+# Ref.: https://cyberbotics.com/doc/guide/tutorial-4-more-about-controllers?tab-language=python#understand-the-e-puck-model
+ps = []
+psNames = ['ps0', 'ps1', 'ps2', 'ps3', 'ps4', 'ps5', 'ps6', 'ps7']
+for i in range(8):
+    ps.append(robot.getDevice(psNames[i]))
+    ps[i].enable(timestep)
+
 # ground sensors
 gs = []
 gsNames = ['gs0', 'gs1', 'gs2']
@@ -57,29 +69,33 @@ rightMotor.setPosition(float('inf'))
 leftMotor.setVelocity(0.0)
 rightMotor.setVelocity(0.0)
 
-#-------------------------------------------------------
-# Main loop:
-# perform simulation steps until Webots is stopping the controller
-# Implements the see-think-act cycle
-
+states = ['forward', 'turn_right', 'turn_left', 'stop']
+current_state = 'forward'
 
 while robot.step(timestep) != -1:
 
     ############################################
     #                  See                     #
     ############################################
-    
 
     # Update sensor readings
     gsValues = []
     for i in range(3):
         gsValues.append(gs[i].getValue())
 
+
     # Process sensor data
     line_right = gsValues[0] > 600
     line_center = gsValues[1] > 600
     line_left = gsValues[2] > 600
 
+    # Read proximity sensors values
+    psValues = []
+    for i in range(8):
+        psValues.append(ps[i].getValue())
+
+    Obstacle = psValues[0] > 1000 or psValues[1] > 1000 or psValues[2] > 1000 or psValues[3] > 1000
+    
     # Build the message to be sent to the ESP32 with the ground
     # sensor data: 0 = line detected; 1 = line not detected
     message = ''
@@ -95,27 +111,25 @@ while robot.step(timestep) != -1:
         message += '1'
     else:
         message += '0'
-    
-    print('--- SEE ---')
-    print(f'Raw sensor values: {gsValues}')
-    print(f'Processed values - Left:{line_left} Center:{line_center} Right:{line_right}')
-    print(f'Sending to ESP32: {message}')
+        # Add obstacle detection to the message
+    if Obstacle:
+        message += 'O'  # 'O' for Obstacle
+    else:
+        message += 'N'  # 'N' for No obstacle
     msg_bytes = bytes(message + '\n', 'UTF-8')
-    ser.write(msg_bytes)   
+    
 
-    ############################################
-    #                 Think                    #
-    ############################################
+    #recieve the message from the microcontroller
 
     # Serial communication: if something is received, then update the current state
-    print('--- THINK ---')
     if ser.in_waiting:
-        value = str(ser.readline(), 'UTF-8')[:-1]
-        if value.startswith('DEBUG:'):
-            print(f'Debug from ESP32: {value}')
-        else:
+        print("Received data from microcontroller")
+        value = str(ser.readline(), 'UTF-8').strip()  # ignore the last character
+        if value.startswith("#DEBUG:"):
+            debug_message = value[7:]  # Extract the debug message
+            print(f"#DEBUG: {debug_message}")
+        elif value in states:
             current_state = value
-            print(f'Command received: {value}')
 
     # Update speed according to the current state
     if current_state == 'forward':
@@ -134,7 +148,6 @@ while robot.step(timestep) != -1:
         leftSpeed = 0.0
         rightSpeed = 0.0
  
-
     ############################################
     #                  Act                     #
     ############################################
@@ -143,8 +156,10 @@ while robot.step(timestep) != -1:
     leftMotor.setVelocity(leftSpeed)
     rightMotor.setVelocity(rightSpeed)
    
-    print('--- ACT ---')
-    print(f'Current state: {current_state}, Motors - Left: {leftSpeed:.2f}, Right: {rightSpeed:.2f}')
-    print('------------\n')
+    # Print sensor message and current state for debugging
+    print(f'Sensor message: {msg_bytes} - Current state: {current_state}')
+
+    # Send message to the microcontroller 
+    ser.write(msg_bytes)  
 
 ser.close()
