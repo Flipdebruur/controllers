@@ -18,11 +18,7 @@ obstacle_detected = False
 # Now switch to UART1 for communication with Webots
 uart = UART(1, 115200, tx=1, rx=3)
 
-def send_debug_message(message):
-    try:
-        uart.write("#DEBUG:" + message + '\n')
-    except Exception as e:
-        print(f"Error sending debug message: {e}")
+
 
 def create_grid():
     grid = ([
@@ -123,7 +119,7 @@ def dijkstra(grid, costs, start, goal):
 costs = create_costs()
 grid = create_grid()
 start = (0, 0)
-goal = (4, 0)
+goal = (0, 2)
 path = dijkstra(grid, costs, start, goal)
 obstacle_pos = None # This should be set to the position of the obstacle when detected
 
@@ -132,8 +128,6 @@ def pathfinder(obstacle_pos, costs, start, goal):
         y, x = obstacle_pos
         if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
             costs[y][x] = 999
-        else:
-            print("Obstacle registered")
     return dijkstra(grid, costs, start, goal)
 
 # Initial status of the line sensor: updated by Webots via serial
@@ -142,7 +136,7 @@ line_center = False
 line_right = False
 
 # Variables to implement the line-following state machine
-current_state = 'forward'
+current_state = 'forward'  # Initial state
 counter = 0
 COUNTER_MAX = 5
 COUNTER_STOP = 50
@@ -185,7 +179,8 @@ def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
     return [x, y, phi]
 
 #path following variables
-current_path_index = 0
+current_path_index = 0 # Index of the current point in the path
+path = pathfinder(obstacle_pos, costs, start, goal)  # Initial path calculation
 turning = False
 
 while True:
@@ -200,20 +195,18 @@ while True:
                 line_center = msg_str[1] == '1'
                 line_right  = msg_str[2] == '1'
                 obstacle_detected = msg_str[3] == 'O'
-            else:
-                print("Invalid message received:", msg_str)
         except Exception as e:
-            print("UART read error:", e)
-
+            # Blink LED rapidly 3 times to indicate UART error
+            for _ in range(3):
+                led_board.value(1)
+                sleep(0.1)
+                led_board.value(0)
+                sleep(0.1)
     ##################   Think   ###################
     encoderValues = [enc.getValue() for enc in encoder]
-    send_debug_message(f"Encoder values: {encoderValues}")   
-    send_debug_message(f"Old encoder values: {oldEncoderValues}")
-    send_debug_message(f"delta_t: {delta_t}")
     [wl, wr] = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
     [u, w] = get_robot_speeds(wl, wr, R, D)
     [x, y, phi] = get_robot_pose(u, w, x, y, phi, delta_t)
-    send_debug_message(f"Odometry: x={x:.2f}, y={y:.2f}, phi={phi:.3f}")
 
     oldEncoderValues = encoderValues.copy()
 
@@ -221,64 +214,11 @@ while True:
     current_grid_x = int(x / 0.1)  # Assuming each grid cell is 0.1 meters wide
     current_grid_y = int(y / 0.1)  # Assuming each grid cell is 0.1 meters high
     current_grid_pos = (current_grid_y, current_grid_x)
-    send_debug_message(f"Current grid position: {current_grid_pos}")
-
     if obstacle_detected:
-        send_debug_message(f"Obstacle detected at: ({y:.2f}, {x:.2f})")
-        grid_x = int(x / 0.1)  # Convert robot's x position to grid coordinates
-        grid_y = int(y / 0.1)  # Convert robot's y position to grid coordinates
         path = pathfinder(obstacle_pos, costs, start, goal)
-        send_debug_message(f"New path after obstacle: {path}")
-        send_debug_message(f"current_path_index: {current_path_index}")
-
-    # Path Following Logic
-    if path and current_path_index < len(path):
-        next_grid_pos = path[current_path_index]
-
-        # Check if we're at a "turn point" (where the path changes direction)
-        if current_grid_pos == next_grid_pos and current_path_index < len(path) - 1:
-            send_debug_message("Intersection detected")
-            next_next_grid_pos = path[current_path_index + 1]
-
-            # Determine the direction of the turn
-            if next_next_grid_pos[1] > current_grid_pos[1]:  # Moving East
-                turn_direction = "east"
-            elif next_next_grid_pos[1] < current_grid_pos[1]:  # Moving West
-                turn_direction = "west"
-            elif next_next_grid_pos[0] > current_grid_pos[0]:  # Moving South
-                turn_direction = "south"
-            elif next_next_grid_pos[0] < current_grid_pos[0]:  # Moving North
-                turn_direction = "north"
-            else:
-                turn_direction = None  # No turn needed
-
-            # Initiate the turn
-            if turn_direction:
-                send_debug_message(f"Turning towards: {turn_direction}")
-                if turn_direction == "east":
-                    current_state = 'turn_right'
-                elif turn_direction == "west":
-                    current_state = 'turn_left'
-                elif turn_direction == "south":
-                    current_state = 'turn_right'
-                elif turn_direction == "north":
-                    current_state = 'turn_left'
-                state_updated = True
-                turning = True  # Set the turning flag
-                counter = 0  # Reset the counter for the turn
-                print(f"Initiating turn towards: {turn_direction}")
-
-        # If not turning, continue forward
-        elif not turning:
-            current_state = 'forward'
-            state_updated = True
-
-    else:
-        current_state = 'stop'
-        state_updated = True
-        send_debug_message("Reached destination or path is invalid.")
+    
     # Line Following Logic (Only active when not turning)
-    if not turning:
+    if current_state == 'forward':
         if line_right and not line_left:
             current_state = 'turn_right'
             state_updated = True
@@ -293,22 +233,19 @@ while True:
         if counter >= COUNTER_MAX:
             current_state = 'forward'
             state_updated = True
-            turning = False  # Clear the turning flag
             current_path_index += 1  # Move to the next point in the path
 
     elif current_state == 'stop':
-        led_board.value(1)
         if counter >= COUNTER_STOP:
             current_state = 'forward'
             state_updated = True
 
     # Send the new state when updated
     if state_updated:
-        send_debug_message(f"Sending to Webots: {current_state}")
         uart.write(current_state + '\n')
         state_updated = False
 
     counter += 1    # increment counter
-    sleep(0.02)     # wait 0.02 seconds
+    sleep(0.09)     # wait 
    
 

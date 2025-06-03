@@ -69,9 +69,6 @@ rightMotor.setPosition(float('inf'))
 leftMotor.setVelocity(0.0)
 rightMotor.setVelocity(0.0)
 
-states = ['forward', 'turn_right', 'turn_left', 'stop']
-current_state = 'forward'
-
 while robot.step(timestep) != -1:
 
     ############################################
@@ -83,7 +80,6 @@ while robot.step(timestep) != -1:
     for i in range(3):
         gsValues.append(gs[i].getValue())
 
-
     # Process sensor data
     line_right = gsValues[0] > 600
     line_center = gsValues[1] > 600
@@ -94,7 +90,7 @@ while robot.step(timestep) != -1:
     for i in range(8):
         psValues.append(ps[i].getValue())
 
-    Obstacle = psValues[0] > 1000 or psValues[1] > 1000 or psValues[2] > 1000 or psValues[3] > 1000
+    Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
     
     # Build the message to be sent to the ESP32 with the ground
     # sensor data: 0 = line detected; 1 = line not detected
@@ -117,19 +113,13 @@ while robot.step(timestep) != -1:
     else:
         message += 'N'  # 'N' for No obstacle
     msg_bytes = bytes(message + '\n', 'UTF-8')
-    
 
     #recieve the message from the microcontroller
 
     # Serial communication: if something is received, then update the current state
     if ser.in_waiting:
-        print("Received data from microcontroller")
-        value = str(ser.readline(), 'UTF-8').strip()  # ignore the last character
-        if value.startswith("#DEBUG:"):
-            debug_message = value[7:]  # Extract the debug message
-            print(f"#DEBUG: {debug_message}")
-        elif value in states:
-            current_state = value
+        value = str(ser.readline(), 'UTF-8').strip()
+        current_state = value
 
     # Update speed according to the current state
     if current_state == 'forward':
@@ -137,10 +127,12 @@ while robot.step(timestep) != -1:
         rightSpeed = speed
             
     elif current_state == 'turn_right':
+        print("Turning right")
         leftSpeed = 0.5 * speed
         rightSpeed = 0 * speed
 
     elif current_state == 'turn_left':
+        print("Turning left")
         leftSpeed = 0 * speed
         rightSpeed = 0.5 * speed
         
