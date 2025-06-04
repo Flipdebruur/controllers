@@ -121,7 +121,9 @@ else:
             y, x = obstacle_pos
             if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
                 costs[y][x] = 999
-        return dijkstra(grid, costs, start, goal)
+        path = dijkstra(grid, costs, start, goal)
+        odom_goals = generate_path_goals(path)
+        return path, odom_goals
     col = 0
     row = 0
     # === World-to-Grid Calibration ===
@@ -146,20 +148,18 @@ else:
         y = ORIGIN_Y + (row * CELL_HEIGHT)
         return (x, y)
 
-    
     def generate_path_goals(path):
         odom_goals = []
-        for (row, col) in path:
+        for row, col in path:
             x, y = grid_to_odom(row, col)
             odom_goals.append((x, y))
         return odom_goals
 
+  
+
     obstacle_pos = None # This should be set to the position of the obstacle when detected
     current_pos = (col, row)  # Current position in the grid (row, col)
     obstacle_detected = False
-
-    # Variables to implement the line-following state machine
-    current_state = 'forward'  # Initial state
     counter = 0
     COUNTER_MAX = 5
     COUNTER_STOP = 50
@@ -169,20 +169,23 @@ else:
     path_index = 0  # reset path index to start of new path
     data = None       
     path = dijkstra(grid, costs, start, goal)  #generate path
+    odom_goals = generate_path_goals(path)
     while True:
         # Check if anything was received via serial to update sensor status
         if uart.any():
             try:
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
+                data = msg_str.split(',')
+                
                 if len(data) == 4:
                     obstacle_status = data[0] # This will be 'O' or 'N'
                     obstacle_detected = (obstacle_status == 'O')
                     x = float(data[1]) 
                     y = float(data[2])
                     phi = float(data[3])
-                    current_x = x
-                    current_y = y
+
+                    current_pos = odom_to_grid(x, y)
             except Exception as e:
                 # Blink LED rapidly 3 times to indicate UART error
                 for _ in range(3):
@@ -191,43 +194,31 @@ else:
                     led_board.value(0)
                     sleep(0.1)
         
-        odom_to_grid(x, y)
+
         ##################   Think   ###################
-        #turn recieved odometry into gridposition
+        #the obstacle detected should turn the current position into a blocked one 
         if obstacle_detected:
             obstacle_pos = (current_pos[0], current_pos[1])  # Update obstacle position
-            path = pathfinder(obstacle_pos, costs, start, goal)
-            path() = (0, 0) #it starts over
-        
-        path = dijkstra(grid, costs, start, goal)
-        odom_goals = generate_path_goals(path)
-        path_index = 0  # Start at the first odom goal
+            path = pathfinder(obstacle_pos, costs, start, goal) #this increases the costs if obstacle is there
+            odom_goals = generate_path_goals(path)
+            path_index = 0 
+            obstacle_detected = False
+        if path_index < len(odom_goals):
+            odom_goal = odom_goals[path_index]
+            goal_x, goal_y = odom_goal
 
 
-        if odom_goal == (current_x, current_y)
-            # Update grid position from odometry
-            current_pos = odom_to_grid(current_x, current_y)
+        TOLERANCE = 0.02  # meters
+        dx = goal_x [0] - x
+        dy = goal_y [1] - y
+        if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE:
+            path_index += 1
+            state_updated = True
 
-            if obstacle_detected:
-                obstacle_pos = current_pos
-                path = pathfinder(obstacle_pos, costs, current_pos, goal)
-                odom_goals = generate_path_goals(path)
-                path_index = 0  # Reset to start of new path
-
-            # Only move to next goal if current is reached (within a tolerance)
-            TOLERANCE = 0.02  # meters
-
-            if path_index < len(odom_goals):
-                odom_goal = odom_goals[path_index]
-                goal_x, goal_y = odom_goal
-                dx = goal_x - current_x
-                dy = goal_y - current_y
-                if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE:
-                    path_index += 1
-                    state_updated = True
         # Send the new state when updated
-        if state_updated:
-            uart.write({col, row} + '\n')
+        if state_updated and path_index < len(odom_goals):
+            goal_x, goal_y = odom_goals[path_index]
+            uart.write(f"{goal_x}, {goal_y} + '\n'")
             state_updated = False
             counter = 0
 

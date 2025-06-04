@@ -135,25 +135,7 @@ while robot.step(timestep) != -1:
         value = str(ser.readline(), 'UTF-8').strip()
         current_state = value
 
-    # Update speed according to the current state
-    if current_state == 'forward':
-        leftSpeed = speed
-        rightSpeed = speed
-        turn_left_counter = 0
-        turn_right_counter = 0
-             
-    elif current_state == 'turn_right':
-        leftSpeed = 0.5 * speed
-        rightSpeed = -0.5 * speed
 
-            
-    elif current_state == 'turn_left':
-        leftSpeed = 0 * speed
-        rightSpeed = 0.5 * speed
-        
-    elif current_state == 'stop':
-        leftSpeed = 0.0
-        rightSpeed = 0.0
 
  
     ############################################
