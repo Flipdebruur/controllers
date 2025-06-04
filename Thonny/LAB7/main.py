@@ -116,76 +116,47 @@ else:
         path.reverse()  # Reverse the path to make it from start to the goal node
         return path
 
-    costs = create_costs()
-    grid = create_grid()
-    start = (0, 0)
-    goal = (0, 2)
-    heading = 'N' #cant send heading to Webots, so this is just for internal use bc of overlap in N
-    obstacle_pos = None # This should be set to the position of the obstacle when detected
-    ccurrent_pos = (0, 0)  # Current position in the grid (row, col)
-    # === World-to-Grid Calibration ===
-    CELL_WIDTH = 0.062       # meters
-    CELL_HEIGHT = 0.0635     # meters
-    ORIGIN_X = 0.5           # x position of grid[2][0]
-    ORIGIN_Y = -0.381441     # y position of grid[0][0]
-
-    def is_near(pos1, pos2):
-        return abs(pos1[0] - pos2[0]) <= 1 and abs(pos1[1] - pos2[1]) <= 1
-
-    def odom_to_grid(x, y):
-        col = round((x - ORIGIN_X) / -CELL_WIDTH)
-        row = round((y - ORIGIN_Y) / CELL_HEIGHT)
-        return (row, col)
-
-    def update_heading(turn, heading):
-        directions = ['N', 'E', 'S', 'W']  # North, East, South, West
-        idx = directions.index(heading)  # Get the current index of the heading
-        if turn == 'right':
-            heading = directions[(idx + 1) % 4]  # Turn right
-        elif turn == 'left':
-            heading = directions[(idx - 1) % 4]  # Turn left
-        return heading
-
     def pathfinder(obstacle_pos, costs, start, goal):
         if obstacle_pos is not None:
             y, x = obstacle_pos
             if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
                 costs[y][x] = 999
         return dijkstra(grid, costs, start, goal)
+    col = 0
+    row = 0
+    # === World-to-Grid Calibration ===
+    CELL_WIDTH = 0.062       # meters
+    CELL_HEIGHT = 0.0635     # meters
+    ORIGIN_X = 0.5           # x position  
+    ORIGIN_Y = -0.381441     # y position  
+    HEADING = 0              # phi position
 
-    def get_turn_direction(current_pos, next_pos, heading):
-        dr = next_pos[0] - current_pos[0]
-        dc = next_pos[1] - current_pos[1]
-        direction_map = {
-            (0, 1): 'E',
-            (1, 0): 'S',
-            (0, -1): 'W',
-            (-1, 0): 'N'
-        }
-        desired_heading = direction_map.get((dr, dc))
-        if not desired_heading:
-            return None  # No valid move
+    costs = create_costs()
+    grid = create_grid()
+    start = (1, 0)
+    goal = (8, 2)
 
-        headings = ['N', 'E', 'S', 'W']
-        idx_current = headings.index(heading)
-        idx_desired = headings.index(desired_heading)
-        diff = (idx_desired - idx_current) % 4
+    def odom_to_grid(x, y):
+        col = round((x - ORIGIN_X) / -CELL_WIDTH)
+        row = round((y - ORIGIN_Y) / CELL_HEIGHT)
+        return (row, col)
+    
+    def grid_to_odom(row, col):
+        x = ORIGIN_X - (col * CELL_WIDTH)
+        y = ORIGIN_Y + (row * CELL_HEIGHT)
+        return (x, y)
 
-        if diff == 0:
-            return 'forward'
-        elif diff == 1:
-            return 'turn_90_right'
-        elif diff == 3:
-            return 'turn_90_left'
-        else:
-            return 'turn_90_right'
-    path_index = 0  # Index to track the current position in the path
+    
+    def generate_path_goals(path):
+        odom_goals = []
+        for (row, col) in path:
+            x, y = grid_to_odom(row, col)
+            odom_goals.append((x, y))
+        return odom_goals
+
+    obstacle_pos = None # This should be set to the position of the obstacle when detected
+    current_pos = (col, row)  # Current position in the grid (row, col)
     obstacle_detected = False
-
-    # Initial status of the line sensor: updated by Webots via serial
-    line_left = False
-    line_center = False
-    line_right = False
 
     # Variables to implement the line-following state machine
     current_state = 'forward'  # Initial state
@@ -193,47 +164,25 @@ else:
     COUNTER_MAX = 5
     COUNTER_STOP = 50
     state_updated = True
-    current_pos = (0, 1)  # <-- set this to match the robot's start location in grid coordinates
     start = current_pos
+    obstacle_status = 'N'
     path_index = 0  # reset path index to start of new path
-    path = pathfinder(obstacle_pos, costs, start, goal)
-
-
-    turning = False
-
+    data = None       
+    path = dijkstra(grid, costs, start, goal)  #generate path
     while True:
         # Check if anything was received via serial to update sensor status
         if uart.any():
             try:
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
-
-                # Example received message: '110N,0.512,-0.340,0.123'
-                data = msg_str.split(',')
-                sensor_part = data[0]  # '110N'
-                if len(sensor_part) == 4 and all(c in '01' for c in sensor_part[:3]) and sensor_part[3] in 'ON':
-                    line_left   = sensor_part[0] == '1'
-                    line_center = sensor_part[1] == '1'
-                    line_right  = sensor_part[2] == '1'
-                    obstacle_detected = sensor_part[3] == 'O'
-                    if len(data) == 4:
-                        x = float(data[1])
-                        y = float(data[2])
-                        phi = float(data[3])
-                grid_pos = odom_to_grid(x, y)
-
-                # Check if we reached the next step in the path
-                if path_index < len(path) and is_near(grid_pos, path[path_index]):
-                    current_pos = path[path_index]
-                    path_index += 1
-                    if path_index < len(path):
-                        next_pos = path[path_index]
-                        turn_direction = get_turn_direction(current_pos, next_pos, heading)
-                        if turn_direction and current_state == 'forward':
-                            current_state = turn_direction
-                            state_updated = True
-
-
+                if len(data) == 4:
+                    obstacle_status = data[0] # This will be 'O' or 'N'
+                    obstacle_detected = (obstacle_status == 'O')
+                    x = float(data[1]) 
+                    y = float(data[2])
+                    phi = float(data[3])
+                    current_x = x
+                    current_y = y
             except Exception as e:
                 # Blink LED rapidly 3 times to indicate UART error
                 for _ in range(3):
@@ -241,41 +190,44 @@ else:
                     sleep(0.1)
                     led_board.value(0)
                     sleep(0.1)
+        
+        odom_to_grid(x, y)
         ##################   Think   ###################
+        #turn recieved odometry into gridposition
         if obstacle_detected:
             obstacle_pos = (current_pos[0], current_pos[1])  # Update obstacle position
             path = pathfinder(obstacle_pos, costs, start, goal)
-
+            path() = (0, 0) #it starts over
         
-            # State logic: turning, stopping, and updating heading
+        path = dijkstra(grid, costs, start, goal)
+        odom_goals = generate_path_goals(path)
+        path_index = 0  # Start at the first odom goal
 
-            if current_state == 'turn_right' or current_state == 'turn_left':
-                if counter >= COUNTER_MAX:
-                    current_state = 'forward'
+
+        if odom_goal == (current_x, current_y)
+            # Update grid position from odometry
+            current_pos = odom_to_grid(current_x, current_y)
+
+            if obstacle_detected:
+                obstacle_pos = current_pos
+                path = pathfinder(obstacle_pos, costs, current_pos, goal)
+                odom_goals = generate_path_goals(path)
+                path_index = 0  # Reset to start of new path
+
+            # Only move to next goal if current is reached (within a tolerance)
+            TOLERANCE = 0.02  # meters
+
+            if path_index < len(odom_goals):
+                odom_goal = odom_goals[path_index]
+                goal_x, goal_y = odom_goal
+                dx = goal_x - current_x
+                dy = goal_y - current_y
+                if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE:
+                    path_index += 1
                     state_updated = True
-
-            elif current_state == 'turn_90_right':
-                if counter >= COUNTER_MAX:
-                    heading = update_heading('right', heading)
-                    current_state = 'forward'
-                    state_updated = True
-
-            elif current_state == 'turn_90_left':
-                if counter >= COUNTER_MAX:
-                    heading = update_heading('left', heading)
-                    current_state = 'forward'
-                    state_updated = True
-
-            elif current_state == 'stop':
-                if counter >= COUNTER_STOP:
-                    current_state = 'forward'
-                    state_updated = True
-
-
-
         # Send the new state when updated
         if state_updated:
-            uart.write(current_state + '\n')
+            uart.write({col, row} + '\n')
             state_updated = False
             counter = 0
 

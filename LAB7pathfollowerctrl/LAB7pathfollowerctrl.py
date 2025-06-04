@@ -43,19 +43,11 @@ current_state = 'forward'
 # Initialize devices
 
 # proximity sensors
-# Ref.: https://cyberbotics.com/doc/guide/tutorial-4-more-about-controllers?tab-language=python#understand-the-e-puck-model
 ps = []
 psNames = ['ps0', 'ps1', 'ps2', 'ps3', 'ps4', 'ps5', 'ps6', 'ps7']
 for i in range(8):
     ps.append(robot.getDevice(psNames[i]))
     ps[i].enable(timestep)
-
-# ground sensors
-gs = []
-gsNames = ['gs0', 'gs1', 'gs2']
-for i in range(3):
-    gs.append(robot.getDevice(gsNames[i]))
-    gs[i].enable(timestep)
 
 # motors    
 leftMotor = robot.getDevice('left wheel motor')
@@ -64,9 +56,6 @@ leftMotor.setPosition(float('inf'))
 rightMotor.setPosition(float('inf'))
 leftMotor.setVelocity(0.0)
 rightMotor.setVelocity(0.0)
-
-turn_left_counter = 0
-turn_right_counter = 0
 
 encoder = []
 encoderNames = ['left wheel sensor', 'right wheel sensor']
@@ -89,12 +78,10 @@ def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
     return [wl, wr]
-
 def get_robot_speeds(wl, wr, r, d):
     u = (r / 2) * (wl + wr)  # linear speed [m/s]
     w = (r / d) * (wr - wl)  # angular speed [rad/s]
     return [u, w]
-
 def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
     x = x_old + u * math.cos(phi_old) * delta_t
     y = y_old + u * math.sin(phi_old) * delta_t
@@ -105,7 +92,6 @@ encoderValues = [enc.getValue() for enc in encoder]
 oldEncoderValues = encoderValues.copy()
 
 while robot.step(timestep) != -1:
-
     ############################################
     #                  See                     #
     ############################################
@@ -124,37 +110,23 @@ while robot.step(timestep) != -1:
     psValues = []
     for i in range(8):
         psValues.append(ps[i].getValue())
-
     Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
+
     encoderValues = [enc.getValue() for enc in encoder]
     wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
     u, w = get_robot_speeds(wl, wr, R, D)
     x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
     oldEncoderValues = encoderValues.copy()
     print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
+
     # Build the message to be sent to the ESP32
-    # sensor data: 0 = line detected; 1 = line not detected
     message = ''
-    if line_left:
-        message += '1'
-    else:
-        message += '0'
-    if line_center:
-        message += '1'
-    else:
-        message += '0'
-    if line_right:
-        message += '1'
-    else:
-        message += '0'
-        # Add obstacle detection to the message
     if Obstacle:
         message += 'O'  # 'O' for Obstacle
     else:
         message += 'N'  # 'N' for No obstacle
     # Append odometry values (rounded for compactness)
-    message += f",{x:.3f},{y:.3f},{phi:.3f}"
-
+    message += f",{x:.3f},{y:.3f},{phi:.3f}
     msg_bytes = bytes(message + '\n', 'UTF-8')
 
     #recieve the message from the microcontroller
@@ -169,47 +141,20 @@ while robot.step(timestep) != -1:
         rightSpeed = speed
         turn_left_counter = 0
         turn_right_counter = 0
-        
-            
+             
     elif current_state == 'turn_right':
         leftSpeed = 0.5 * speed
-        rightSpeed = 0 * speed
+        rightSpeed = -0.5 * speed
 
-    elif current_state == '90_deg_right':
-        if turn_right_counter < 40:
-            leftSpeed = speed
-            rightSpeed = speed
-            turn_right_counter += 1
-        elif turn_right_counter < 160:
-            leftSpeed = 0.5 * speed
-            rightSpeed = -0.5 * speed
-            turn_right_counter += 1
-        else:
-            # After turning, go back to forward and reset counter
-            current_state = 'forward'
-            turn_left_counter = 0
             
     elif current_state == 'turn_left':
         leftSpeed = 0 * speed
         rightSpeed = 0.5 * speed
         
-    elif current_state == '90_deg_left':
-        if turn_left_counter < 40:
-            leftSpeed = speed
-            rightSpeed = speed
-            turn_left_counter += 1
-        elif turn_left_counter < 160:
-            leftSpeed = -0.5 * speed
-            rightSpeed = 0.5 * speed
-            turn_left_counter += 1
-        else:
-            # After turning, go back to forward and reset counter
-            current_state = 'forward'
-            turn_left_counter = 0
-        
     elif current_state == 'stop':
         leftSpeed = 0.0
         rightSpeed = 0.0
+
  
     ############################################
     #                  Act                     #
