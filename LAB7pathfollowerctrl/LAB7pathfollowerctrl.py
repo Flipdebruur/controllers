@@ -124,8 +124,8 @@ while robot.step(timestep) != -1:
         rightSpeed = speed
             
     elif current_state == 'turn_right':
-        leftSpeed = 0.3 * speed
-        rightSpeed = 0.1 * speed
+        leftSpeed = 0.5 * speed
+        rightSpeed = 0 * speed
 
     elif current_state == '90_deg_right':
         if turn_right_counter < 40:
@@ -142,8 +142,8 @@ while robot.step(timestep) != -1:
             turn_left_counter = 0
             
     elif current_state == 'turn_left':
-        leftSpeed = 0.1 * speed
-        rightSpeed = 0.3 * speed
+        leftSpeed = 0 * speed
+        rightSpeed = 0.5 * speed
         
     elif current_state == '90_deg_left':
         if turn_left_counter < 40:
