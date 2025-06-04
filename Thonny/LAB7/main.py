@@ -122,7 +122,20 @@ else:
     goal = (0, 2)
     heading = 'N' #cant send heading to Webots, so this is just for internal use bc of overlap in N
     obstacle_pos = None # This should be set to the position of the obstacle when detected
-    current_pos = [0, 0]  # Current position in the grid (row, col)
+    ccurrent_pos = (0, 0)  # Current position in the grid (row, col)
+    # === World-to-Grid Calibration ===
+    CELL_WIDTH = 0.062       # meters
+    CELL_HEIGHT = 0.0635     # meters
+    ORIGIN_X = 0.5           # x position of grid[2][0]
+    ORIGIN_Y = -0.381441     # y position of grid[0][0]
+
+    def is_near(pos1, pos2):
+        return abs(pos1[0] - pos2[0]) <= 1 and abs(pos1[1] - pos2[1]) <= 1
+
+    def odom_to_grid(x, y):
+        col = round((x - ORIGIN_X) / -CELL_WIDTH)
+        row = round((y - ORIGIN_Y) / CELL_HEIGHT)
+        return (row, col)
 
     def update_heading(turn, heading):
         directions = ['N', 'E', 'S', 'W']  # North, East, South, West
@@ -132,18 +145,6 @@ else:
         elif turn == 'left':
             heading = directions[(idx - 1) % 4]  # Turn left
         return heading
-    
-    def update_position(pos, heading):
-        new_pos = pos[:]  # Copy the current position
-        if heading == 'N':
-            new_pos[0] -= 1  # Move up
-        elif heading == 'E':
-            new_pos[1] += 1  # Move right
-        elif heading == 'S':
-            new_pos[0] += 1  # Move down
-        elif heading == 'W':
-            new_pos[1] -= 1  # Move left
-        return new_pos  
 
     def pathfinder(obstacle_pos, costs, start, goal):
         if obstacle_pos is not None:
@@ -151,10 +152,6 @@ else:
             if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
                 costs[y][x] = 999
         return dijkstra(grid, costs, start, goal)
-
-    def at_intersection():
-        # Count how many sensors see the line
-        return sum([line_left, line_center, line_right]) >= 2
 
     def get_turn_direction(current_pos, next_pos, heading):
         dr = next_pos[0] - current_pos[0]
@@ -196,8 +193,12 @@ else:
     COUNTER_MAX = 5
     COUNTER_STOP = 50
     state_updated = True
+    current_pos = (0, 1)  # <-- set this to match the robot's start location in grid coordinates
+    start = current_pos
+    path_index = 0  # reset path index to start of new path
+    path = pathfinder(obstacle_pos, costs, start, goal)
 
-    path = pathfinder(obstacle_pos, costs, start, goal)  # Initial path calculation
+
     turning = False
 
     while True:
@@ -207,11 +208,32 @@ else:
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
 
-                if len(msg_str) == 4 and all(c in '01' for c in msg_str[:3]) and msg_str[3] in 'ON':
-                    line_left   = msg_str[0] == '1'
-                    line_center = msg_str[1] == '1'
-                    line_right  = msg_str[2] == '1'
-                    obstacle_detected = msg_str[3] == 'O'
+                # Example received message: '110N,0.512,-0.340,0.123'
+                data = msg_str.split(',')
+                sensor_part = data[0]  # '110N'
+                if len(sensor_part) == 4 and all(c in '01' for c in sensor_part[:3]) and sensor_part[3] in 'ON':
+                    line_left   = sensor_part[0] == '1'
+                    line_center = sensor_part[1] == '1'
+                    line_right  = sensor_part[2] == '1'
+                    obstacle_detected = sensor_part[3] == 'O'
+                    if len(data) == 4:
+                        x = float(data[1])
+                        y = float(data[2])
+                        phi = float(data[3])
+                grid_pos = odom_to_grid(x, y)
+
+                # Check if we reached the next step in the path
+                if path_index < len(path) and is_near(grid_pos, path[path_index]):
+                    current_pos = path[path_index]
+                    path_index += 1
+                    if path_index < len(path):
+                        next_pos = path[path_index]
+                        turn_direction = get_turn_direction(current_pos, next_pos, heading)
+                        if turn_direction and current_state == 'forward':
+                            current_state = turn_direction
+                            state_updated = True
+
+
             except Exception as e:
                 # Blink LED rapidly 3 times to indicate UART error
                 for _ in range(3):
@@ -223,53 +245,33 @@ else:
         if obstacle_detected:
             obstacle_pos = (current_pos[0], current_pos[1])  # Update obstacle position
             path = pathfinder(obstacle_pos, costs, start, goal)
+
         
-        if at_intersection() and current_state == 'forward':
-            current_pos = update_position(current_pos, heading)
-            path_index += 1
-            if path_index < len(path):
-                next_pos = path[path_index]
-                turn_direction = get_turn_direction(current_pos, next_pos, heading)
-                if turn_direction == 'forward':
+            # State logic: turning, stopping, and updating heading
+
+            if current_state == 'turn_right' or current_state == 'turn_left':
+                if counter >= COUNTER_MAX:
                     current_state = 'forward'
-                elif turn_direction == 'turn_90_right':
-                    current_state = 'turn_90_right'
-                elif turn_direction == 'turn_90_left':
-                    current_state = 'turn_90_left'
-                state_updated = True
+                    state_updated = True
 
-        
-        # Line Following Logic (Only active when not turning)
-        if current_state == 'forward':
-            if line_right and not line_left:
-                current_state = 'turn_right'
-                state_updated = True
-            elif line_left and not line_right:
-                current_state = 'turn_left'
-                state_updated = True
+            elif current_state == 'turn_90_right':
+                if counter >= COUNTER_MAX:
+                    heading = update_heading('right', heading)
+                    current_state = 'forward'
+                    state_updated = True
 
-        elif current_state in ['turn_right', 'turn_left']:
-            if counter >= COUNTER_MAX:
-                current_state = 'forward'
-                state_updated = True
+            elif current_state == 'turn_90_left':
+                if counter >= COUNTER_MAX:
+                    heading = update_heading('left', heading)
+                    current_state = 'forward'
+                    state_updated = True
 
-        elif current_state == 'stop':
-            if counter >= COUNTER_STOP:
-                current_state = 'forward'
-                state_updated = True
+            elif current_state == 'stop':
+                if counter >= COUNTER_STOP:
+                    current_state = 'forward'
+                    state_updated = True
 
-        elif current_state == 'turn_90_right':
-            if counter >= COUNTER_MAX:
-                heading = update_heading('right', heading)
-                current_state = 'forward'
-                state_updated = True
 
-        
-        elif current_state == 'turn_90_left':
-            if counter >= COUNTER_MAX:
-                heading = update_heading('left', heading)
-                current_state = 'forward'
-                state_updated = True
 
         # Send the new state when updated
         if state_updated:

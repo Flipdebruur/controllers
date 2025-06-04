@@ -12,6 +12,7 @@ from controller import Robot
 #-------------------------------------------------------
 # Open serial port to communicate with the microcontroller
 import serial
+import math
 try:
     # Change the port parameter according to your system
     ser =  serial.Serial(port='COM7', baudrate=115200, timeout=5) 
@@ -67,6 +68,42 @@ rightMotor.setVelocity(0.0)
 turn_left_counter = 0
 turn_right_counter = 0
 
+encoder = []
+encoderNames = ['left wheel sensor', 'right wheel sensor']
+for name in encoderNames:
+    enc = robot.getDevice(name)
+    enc.enable(timestep)
+    encoder.append(enc)
+
+robot.step(timestep)
+
+# Odometry parameters (place at the top of your file)
+R = 0.020    # wheel radius [m]
+D = 0.057    # distance between wheels [m]
+delta_t = timestep / 1000.0
+
+# Initial pose
+x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
+
+def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
+    wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
+    wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
+    return [wl, wr]
+
+def get_robot_speeds(wl, wr, r, d):
+    u = (r / 2) * (wl + wr)  # linear speed [m/s]
+    w = (r / d) * (wr - wl)  # angular speed [rad/s]
+    return [u, w]
+
+def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
+    x = x_old + u * math.cos(phi_old) * delta_t
+    y = y_old + u * math.sin(phi_old) * delta_t
+    phi = phi_old + w * delta_t
+    return [x, y, phi]
+
+encoderValues = [enc.getValue() for enc in encoder]
+oldEncoderValues = encoderValues.copy()
+
 while robot.step(timestep) != -1:
 
     ############################################
@@ -89,7 +126,12 @@ while robot.step(timestep) != -1:
         psValues.append(ps[i].getValue())
 
     Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
-    
+    encoderValues = [enc.getValue() for enc in encoder]
+    wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
+    u, w = get_robot_speeds(wl, wr, R, D)
+    x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
+    oldEncoderValues = encoderValues.copy()
+    print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
     # Build the message to be sent to the ESP32
     # sensor data: 0 = line detected; 1 = line not detected
     message = ''
@@ -110,6 +152,9 @@ while robot.step(timestep) != -1:
         message += 'O'  # 'O' for Obstacle
     else:
         message += 'N'  # 'N' for No obstacle
+    # Append odometry values (rounded for compactness)
+    message += f",{x:.3f},{y:.3f},{phi:.3f}"
+
     msg_bytes = bytes(message + '\n', 'UTF-8')
 
     #recieve the message from the microcontroller
@@ -122,6 +167,9 @@ while robot.step(timestep) != -1:
     if current_state == 'forward':
         leftSpeed = speed
         rightSpeed = speed
+        turn_left_counter = 0
+        turn_right_counter = 0
+        
             
     elif current_state == 'turn_right':
         leftSpeed = 0.5 * speed
@@ -131,11 +179,11 @@ while robot.step(timestep) != -1:
         if turn_right_counter < 40:
             leftSpeed = speed
             rightSpeed = speed
-            turn_left_counter += 1
-        elif turn_left_counter < 160:
+            turn_right_counter += 1
+        elif turn_right_counter < 160:
             leftSpeed = 0.5 * speed
-            rightSpeed = 0 * speed
-            turn_left_counter += 1
+            rightSpeed = -0.5 * speed
+            turn_right_counter += 1
         else:
             # After turning, go back to forward and reset counter
             current_state = 'forward'
@@ -151,7 +199,7 @@ while robot.step(timestep) != -1:
             rightSpeed = speed
             turn_left_counter += 1
         elif turn_left_counter < 160:
-            leftSpeed = 0 * speed
+            leftSpeed = -0.5 * speed
             rightSpeed = 0.5 * speed
             turn_left_counter += 1
         else:
