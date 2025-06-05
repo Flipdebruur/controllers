@@ -7,7 +7,6 @@
 # Tested on Webots R2023a, on Windows 11 running Python 3.10.5 64-bit
 # communicating with MicroPython v1.25.0 on generic ESP32 module with ESP32
 
-
 from controller import Robot
 #-------------------------------------------------------
 # Open serial port to communicate with the microcontroller
@@ -19,9 +18,11 @@ try:
 except:
     print("Communication failed. Check the cable connections and serial settings 'port' and 'baudrate'.")
     raise
-    
+
 #-------------------------------------------------------
 # Initialize variables
+
+GOAL_TOLERANCE = 0.002  # meters
 
 MAX_SPEED = 6.28
 speed = 0.4 * MAX_SPEED
@@ -34,10 +35,6 @@ robot = Robot()
 
 # get the time step of the current world.
 timestep = int(robot.getBasicTimeStep())   # [ms]
-
-# states
-states = ['forward', 'turn_right', 'turn_left', 'stop']
-current_state = 'forward'
 
 #-------------------------------------------------------
 # Initialize devices
@@ -73,7 +70,7 @@ delta_t = timestep / 1000.0
 
 # Initial pose
 x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
-
+x_goal, y_goal = 0.6, -0.34  # Initialize with current position
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -95,17 +92,6 @@ while robot.step(timestep) != -1:
     ############################################
     #                  See                     #
     ############################################
-
-    # Update sensor readings
-    gsValues = []
-    for i in range(3):
-        gsValues.append(gs[i].getValue())
-
-    # Process sensor data
-    line_right = gsValues[0] > 600
-    line_center = gsValues[1] > 600
-    line_left = gsValues[2] > 600
-
     # Read proximity sensors values
     psValues = []
     for i in range(8):
@@ -125,17 +111,58 @@ while robot.step(timestep) != -1:
         message += 'O'  # 'O' for Obstacle
     else:
         message += 'N'  # 'N' for No obstacle
-    # Append odometry values (rounded for compactness)
-    message += f",{x:.3f},{y:.3f},{phi:.3f}
+    # Append odometry values 
+    message += f',{x:.3f},{y:.3f},{phi:.3f}'
     msg_bytes = bytes(message + '\n', 'UTF-8')
+
+    # === Go-to-goal control ===
+    dx = x_goal - x
+    dy = y_goal - y
+    distance = math.hypot(dx, dy)
+
+    # Simple proportional controller
+    angle_to_goal = math.atan2(dy, dx)
+    angle_error = angle_to_goal - phi
+    # Normalize angle error to [-pi, pi]
+    angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
+
+    # Control gains
+    K_v = 4.0   # speed gain
+    K_w = 6.0   # rotation gain
+
+    if distance > GOAL_TOLERANCE:
+        v = K_v * distance
+        w = K_w * angle_error
+    else:
+        v = 0.0
+        w = 0.0
+
+    # Convert to wheel speeds
+    wl = (v - w * D / 2) / R
+    wr = (v + w * D / 2) / R
+
+    # Limit speeds
+    wl = max(-MAX_SPEED, min(MAX_SPEED, wl))
+    wr = max(-MAX_SPEED, min(MAX_SPEED, wr))
+
+    leftSpeed = wl
+    rightSpeed = wr
+
 
     #recieve the message from the microcontroller
     # Serial communication: if something is received, then update the current state
-    if ser.in_waiting:
-        value = str(ser.readline(), 'UTF-8').strip()
-        current_state = value
-
-
+    if ser.in_waiting > 0:
+        try:
+            line = ser.readline().decode('UTF-8').strip()
+            parts = line.split(',')
+            if len(parts) == 2:
+                x_goal = float(parts[0])
+                y_goal = float(parts[1])
+                print(f"Received new goal: x={x_goal:.3f}, y={y_goal:.3f}")
+            else:
+                print("Received non-goal message:", line)
+        except Exception as e:
+            print("Serial read failed:", e)
 
  
     ############################################
@@ -147,7 +174,7 @@ while robot.step(timestep) != -1:
     rightMotor.setVelocity(rightSpeed)
    
     # Print sensor message and current state for debugging
-    print(f'Sensor message: {msg_bytes} - Current state: {current_state}')
+    print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
 
     # Send message to the microcontroller 
     ser.write(msg_bytes)  

@@ -2,6 +2,7 @@ from machine import Pin, UART
 from time import sleep
 import heapq
 
+
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
 print("Starting in 5 seconds... Close Thonny and start Webots.")
@@ -19,7 +20,6 @@ if safe_pin.value() == 0:  # pin not grounded
 else:
     # Now switch to UART1 for communication with Webots
     uart = UART(1, 115200, tx=1, rx=3)
-
     def create_grid():
         grid = ([
             [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -116,19 +116,20 @@ else:
         path.reverse()  # Reverse the path to make it from start to the goal node
         return path
 
-    def pathfinder(obstacle_pos, costs, start, goal):
+    def pathfinder(obstacle_pos, costs, start, goal): #calculates new cost, runs dijkstra, generates new checkpoints
         if obstacle_pos is not None:
-            y, x = obstacle_pos
+            x, y = obstacle_pos
             if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
-                costs[y][x] = 999
+                costs[x][y] = 999
         path = dijkstra(grid, costs, start, goal)
-        odom_goals = generate_path_goals(path)
+        odom_goals = generate_path_goals(path) 
         return path, odom_goals
     col = 0
     row = 0
     # === World-to-Grid Calibration ===
     CELL_WIDTH = 0.062       # meters
     CELL_HEIGHT = 0.0635     # meters
+    #starting position
     ORIGIN_X = 0.5           # x position  
     ORIGIN_Y = -0.381441     # y position  
     HEADING = 0              # phi position
@@ -138,12 +139,12 @@ else:
     start = (1, 0)
     goal = (8, 2)
 
-    def odom_to_grid(x, y):
+    def odom_to_grid(x, y): #translate odometry data to grid position
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
         row = round((y - ORIGIN_Y) / CELL_HEIGHT)
         return (row, col)
     
-    def grid_to_odom(row, col):
+    def grid_to_odom(row, col): #translates grid position to odometry data (ut's reversed)
         x = ORIGIN_X - (col * CELL_WIDTH)
         y = ORIGIN_Y + (row * CELL_HEIGHT)
         return (x, y)
@@ -155,12 +156,9 @@ else:
             odom_goals.append((x, y))
         return odom_goals
 
-  
-
     obstacle_pos = None # This should be set to the position of the obstacle when detected
     current_pos = (col, row)  # Current position in the grid (row, col)
     obstacle_detected = False
-    counter = 0
     COUNTER_MAX = 5
     COUNTER_STOP = 50
     state_updated = True
@@ -194,35 +192,31 @@ else:
                     led_board.value(0)
                     sleep(0.1)
         
-
         ##################   Think   ###################
         #the obstacle detected should turn the current position into a blocked one 
         if obstacle_detected:
-            obstacle_pos = (current_pos[0], current_pos[1])  # Update obstacle position
-            path = pathfinder(obstacle_pos, costs, start, goal) #this increases the costs if obstacle is there
-            odom_goals = generate_path_goals(path)
-            path_index = 0 
+            obstacle_pos = (current_pos[0], current_pos[1])
+            # Assign both return values from pathfinder
+            path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
+            path_index = 0
             obstacle_detected = False
-        if path_index < len(odom_goals):
+        if path_index < len(odom_goals): #checks if the path_index counter is still lower than amount of checkpoints
             odom_goal = odom_goals[path_index]
             goal_x, goal_y = odom_goal
 
-
-        TOLERANCE = 0.02  # meters
+        # is the goal reached?
+        TOLERANCE = 0.01  # meters
         dx = goal_x [0] - x
         dy = goal_y [1] - y
         if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE:
             path_index += 1
+            led_board.value(1)  # LED ON
             state_updated = True
-
         # Send the new state when updated
         if state_updated and path_index < len(odom_goals):
             goal_x, goal_y = odom_goals[path_index]
-            uart.write(f"{goal_x}, {goal_y} + '\n'")
+            uart.write(f'{goal_x},{goal_y}\n')
             state_updated = False
-            counter = 0
-
-        counter += 1    # increment counter
         sleep(0.02)     # wait 
-    
+
 
