@@ -1,7 +1,7 @@
 from machine import Pin, UART
 from time import sleep
 import heapq
-
+# Now switch to UART1 for communication with Webots
 
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
@@ -18,8 +18,7 @@ safe_pin = Pin(0, Pin.IN, Pin.PULL_UP)
 if safe_pin.value() == 0:  # pin not grounded
     print("Safe mode active, skipping loop.")
 else:
-    # Now switch to UART1 for communication with Webots
-    uart = UART(1, 115200, tx=1, rx=3)
+    # uart = UART(1, 115200, tx=1, rx=3)
     def create_grid():
         grid = ([
             [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -119,7 +118,7 @@ else:
     def pathfinder(obstacle_pos, costs, start, goal): #calculates new cost, runs dijkstra, generates new checkpoints
         if obstacle_pos is not None:
             x, y = obstacle_pos
-            if 0 <= y < len(costs) and 0 <= x < len(costs[0]):
+            if 0 <= x < len(costs) and 0 <= y < len(costs[0]):
                 costs[x][y] = 999
         path = dijkstra(grid, costs, start, goal)
         odom_goals = generate_path_goals(path) 
@@ -131,12 +130,14 @@ else:
     CELL_HEIGHT = 0.0635     # meters
     #starting position
     ORIGIN_X = 0.5           # x position  
-    ORIGIN_Y = -0.381441     # y position  
+    ORIGIN_Y = -0.34     # y position  
     HEADING = 0              # phi position
+
+    goal_list = []  # To hold the coordinate list
 
     costs = create_costs()
     grid = create_grid()
-    start = (1, 0)
+    start = (0, 1)
     goal = (8, 2)
 
     def odom_to_grid(x, y): #translate odometry data to grid position
@@ -164,10 +165,13 @@ else:
     state_updated = True
     start = current_pos
     obstacle_status = 'N'
-    path_index = 0  # reset path index to start of new path
+    path_index = 1  # reset path index to start of new path
     data = None       
     path = dijkstra(grid, costs, start, goal)  #generate path
+    print(path)  
     odom_goals = generate_path_goals(path)
+    print(odom_goals)
+    uart = UART(1, 115200, tx=1, rx=3)
     while True:
         # Check if anything was received via serial to update sensor status
         if uart.any():
@@ -184,7 +188,7 @@ else:
                     phi = float(data[3])
 
                     current_pos = odom_to_grid(x, y)
-            except Exception as e:
+            except Exception as e:            
                 # Blink LED rapidly 3 times to indicate UART error
                 for _ in range(3):
                     led_board.value(1)
@@ -196,6 +200,7 @@ else:
         #the obstacle detected should turn the current position into a blocked one 
         if obstacle_detected:
             obstacle_pos = (current_pos[0], current_pos[1])
+            start = current_pos
             # Assign both return values from pathfinder
             path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
             path_index = 0
@@ -205,12 +210,11 @@ else:
             goal_x, goal_y = odom_goal
 
         # is the goal reached?
-        TOLERANCE = 0.01  # meters
-        dx = goal_x [0] - x
-        dy = goal_y [1] - y
-        if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE:
+        TOLERANCE = 0.03  # meters
+        dx = goal_x - x
+        dy = goal_y - y
+        if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE: #goal reached
             path_index += 1
-            led_board.value(1)  # LED ON
             state_updated = True
         # Send the new state when updated
         if state_updated and path_index < len(odom_goals):
