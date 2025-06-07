@@ -145,7 +145,7 @@ else:
         row = round((y - ORIGIN_Y) / CELL_HEIGHT)
         return (row, col)
     
-    def grid_to_odom(row, col): #translates grid position to odometry data (ut's reversed)
+    def grid_to_odom(row, col): #translates grid position to odometry data (it's reversed)
         x = ORIGIN_X - (col * CELL_WIDTH)
         y = ORIGIN_Y + (row * CELL_HEIGHT)
         return (x, y)
