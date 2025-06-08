@@ -174,7 +174,7 @@ while robot.step(timestep) != -1:
             x_goal = float(x_str.strip())
             y_goal = float(y_str.strip())
             coords.append((x_goal, y_goal))
-        #print("Received coordinate list:", coords)
+        print("Received coordinate list:", coords)
         for x_goal, y_goal in coords:
             print(f"x={x}, x_goal={x_goal}, y={y} y_goal={y_goal}")
 
