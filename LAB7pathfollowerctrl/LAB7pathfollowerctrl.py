@@ -21,10 +21,12 @@ except:
 
 #-------------------------------------------------------
 # Initialize variables
-GOAL_TOLERANCE = 0.02  # meters
+
+GOAL_TOLERANCE = 0.002  # meters
 
 MAX_SPEED = 6.28
 speed = 0.4 * MAX_SPEED
+
 leftSpeed = 0.0
 rightSpeed = 0.0
 
@@ -68,7 +70,7 @@ delta_t = timestep / 1000.0
 
 # Initial pose
 x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
-x_goal, y_goal = 0.5, 0.0 # Initialize with current position
+x_goal, y_goal = 0.5, -0.34  # Initialize with current position
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -78,30 +80,10 @@ def get_robot_speeds(wl, wr, r, d):
     w = (r / d) * (wr - wl)  # angular speed [rad/s]
     return [u, w]
 def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
-    x = x_old + u * math.sin(phi_old) * delta_t  # Now X changes with sin(phi)
-    y = y_old + u * math.cos(phi_old) * delta_t  # Now Y changes with cos(phi)
+    x = x_old + u * math.sin(phi_old) * delta_t
+    y = y_old + u * math.cos(phi_old) * delta_t
     phi = phi_old + w * delta_t
     return [x, y, phi]
-def read_Psensor(ps):
-    psValues = []
-    for i in range(8):
-        psValues.append(ps[i].getValue())
-    Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
-    return psValues, Obstacle
-def build_message(Obstacle, x, y, phi):
-    message = ''
-    if Obstacle:
-        message += 'O'
-    else:
-        message += 'N'
-    message += f',{x:.3f},{y:.3f},{phi:.3f}'
-    return bytes(message + '\n', 'UTF-8')
-def odometry(encoder, oldEncoderValues, delta_t, R, D, x, y, phi):
-    encoderValues = [enc.getValue() for enc in encoder]
-    wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
-    u, w = get_robot_speeds(wl, wr, R, D)
-    x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
-    return encoderValues, wl, wr, x, y, phi
 
 encoderValues = [enc.getValue() for enc in encoder]
 oldEncoderValues = encoderValues.copy()
@@ -111,15 +93,27 @@ while robot.step(timestep) != -1:
     #                  See                     #
     ############################################
     # Read proximity sensors values
-    # Read proximity sensors values
-    psValues, Obstacle = read_Psensor(ps)
+    psValues = []
+    for i in range(8):
+        psValues.append(ps[i].getValue())
+    Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
 
-    #odometry
-    encoderValues, wl, wr, x, y, phi = odometry(encoder, oldEncoderValues, delta_t, R, D, x, y, phi)
+    encoderValues = [enc.getValue() for enc in encoder]
+    wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
+    u, w = get_robot_speeds(wl, wr, R, D)
+    x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
     oldEncoderValues = encoderValues.copy()
+    print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
-    #send message
-    msg_bytes = build_message(Obstacle, x, y, phi)
+    # Build the message to be sent to the ESP32
+    message = ''
+    if Obstacle:
+        message += 'O'  # 'O' for Obstacle
+    else:
+        message += 'N'  # 'N' for No obstacle
+    # Append odometry values 
+    message += f',{x:.3f},{y:.3f},{phi:.3f}'
+    msg_bytes = bytes(message + '\n', 'UTF-8')
 
     # === Go-to-goal control ===
     dx = x_goal - x
@@ -157,30 +151,18 @@ while robot.step(timestep) != -1:
 
     #recieve the message from the microcontroller
     # Serial communication: if something is received, then update the current state
-    # ? I should be sending just 2 coordinates tho
-    try:
-        line = ser.readline().decode('UTF-8').strip()
-        print("in try")
-        print(line)
-
-        # Verwijder haakjes aan begin/eind
-        line = line.strip('[]')
-        parts = line.split('),')  # Splits op eind van elke tuple
-
-        coords = []
-        for part in parts:
-            part = part.replace('(', '').replace(')', '').strip()
-            x_str, y_str = part.split(',')
-            x_goal = float(x_str.strip())
-            y_goal = float(y_str.strip())
-            coords.append((x_goal, y_goal))
-        print("Received coordinate list:", coords)
-        for x_goal, y_goal in coords:
-            print(f"x={x}, x_goal={x_goal}, y={y} y_goal={y_goal}")
-
-    except Exception as e:
-        print("Serial read failed:", e)
-
+    if ser.in_waiting > 0:
+        try:
+            line = ser.readline().decode('UTF-8').strip()
+            parts = line.split(',')
+            if len(parts) == 2:
+                x_goal = float(parts[0])
+                y_goal = float(parts[1])
+                print(f"Received new goal: x={x_goal:.3f}, y={y_goal:.3f}")
+            else:
+                print("Received non-goal message:", line)
+        except Exception as e:
+            print("Serial read failed:", e)
 
  
     ############################################
