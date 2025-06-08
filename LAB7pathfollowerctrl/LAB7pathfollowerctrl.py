@@ -72,8 +72,6 @@ delta_t = timestep / 1000.0
 
 last_sent_time = time.time()
 
-
-
 # Initial pose
 x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
 x_goal, y_goal = 0.5, -0.8  # Initialize with current position
@@ -101,7 +99,6 @@ def build_message(Obstacle, x, y, phi):
 robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
 oldEncoderValues = encoderValues.copy()
-sleep(1)
 while robot.step(timestep) != -1:
     robot.step(timestep)
     ############################################
@@ -170,15 +167,12 @@ while robot.step(timestep) != -1:
                 print(f"⚠️ Unexpected goal format: '{line}'")
         except Exception as e:
             print("❌ Serial read failed:", e)
+            
 
-    current_time = time.time()
-    if current_time - last_sent_time > 0.02:
-        #send message
-        msg_bytes = build_message(Obstacle, x, y, phi)
-        # Print sensor message and current state for debugging
-        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
+    msg_bytes = build_message(Obstacle, x, y, phi)
+    # Print sensor message and current state for debugging
+    print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
 
-        last_sent_time = current_time
         
     ############################################
     #                  Act                     #

@@ -242,7 +242,7 @@ else:
             goal_x, goal_y = 0, 6
             uart.write(f'{goal_x},{goal_y}\n')
             sleep(0.01)  # allow time for UART buffer to flush
-            state_updated = False
+            state_updated = True
 
         sleep(0.01)     # wait 
 
