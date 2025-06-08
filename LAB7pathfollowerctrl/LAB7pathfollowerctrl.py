@@ -18,11 +18,13 @@ try:
 except:
     print("Communication failed. Check the cable connections and serial settings 'port' and 'baudrate'.")
     raise
+import time
+from time import sleep
 
 #-------------------------------------------------------
 # Initialize variables
 
-GOAL_TOLERANCE = 0.002  # meters
+GOAL_TOLERANCE = 0.0  # meters
 
 MAX_SPEED = 6.28
 speed = 0.4 * MAX_SPEED
@@ -68,9 +70,13 @@ R = 0.020    # wheel radius [m]
 D = 0.057    # distance between wheels [m]
 delta_t = timestep / 1000.0
 
+last_sent_time = time.time()
+
+
+
 # Initial pose
 x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
-x_goal, y_goal = 0.5, -0.34  # Initialize with current position
+x_goal, y_goal = 0.5, -0.8  # Initialize with current position
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -84,11 +90,20 @@ def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
     y = y_old + u * math.cos(phi_old) * delta_t
     phi = phi_old + w * delta_t
     return [x, y, phi]
-
+def build_message(Obstacle, x, y, phi):
+    message = ''
+    if Obstacle:
+        message += 'O'
+    else:
+        message += 'N'
+    message += f',{x:.3f},{y:.3f},{phi:.3f}'
+    return bytes(message + '\n', 'UTF-8')
+robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
 oldEncoderValues = encoderValues.copy()
-
+sleep(1)
 while robot.step(timestep) != -1:
+    robot.step(timestep)
     ############################################
     #                  See                     #
     ############################################
@@ -103,17 +118,8 @@ while robot.step(timestep) != -1:
     u, w = get_robot_speeds(wl, wr, R, D)
     x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
     oldEncoderValues = encoderValues.copy()
-    print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
+    #print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
-    # Build the message to be sent to the ESP32
-    message = ''
-    if Obstacle:
-        message += 'O'  # 'O' for Obstacle
-    else:
-        message += 'N'  # 'N' for No obstacle
-    # Append odometry values 
-    message += f',{x:.3f},{y:.3f},{phi:.3f}'
-    msg_bytes = bytes(message + '\n', 'UTF-8')
 
     # === Go-to-goal control ===
     dx = x_goal - x
@@ -153,18 +159,27 @@ while robot.step(timestep) != -1:
     # Serial communication: if something is received, then update the current state
     if ser.in_waiting > 0:
         try:
+            print("In try serial data coming:")
             line = ser.readline().decode('UTF-8').strip()
             parts = line.split(',')
             if len(parts) == 2:
                 x_goal = float(parts[0])
                 y_goal = float(parts[1])
-                print(f"Received new goal: x={x_goal:.3f}, y={y_goal:.3f}")
+                print(f"✅ Received new goal: x={x_goal:.4f}, y={y_goal:.4f}")
             else:
-                print("Received non-goal message:", line)
+                print(f"⚠️ Unexpected goal format: '{line}'")
         except Exception as e:
-            print("Serial read failed:", e)
+            print("❌ Serial read failed:", e)
 
- 
+    current_time = time.time()
+    if current_time - last_sent_time > 0.02:
+        #send message
+        msg_bytes = build_message(Obstacle, x, y, phi)
+        # Print sensor message and current state for debugging
+        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
+
+        last_sent_time = current_time
+        
     ############################################
     #                  Act                     #
     ############################################
@@ -173,8 +188,6 @@ while robot.step(timestep) != -1:
     leftMotor.setVelocity(leftSpeed)
     rightMotor.setVelocity(rightSpeed)
    
-    # Print sensor message and current state for debugging
-    print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
 
     # Send message to the microcontroller 
     ser.write(msg_bytes)  

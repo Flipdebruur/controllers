@@ -1,12 +1,11 @@
 from machine import Pin, UART
 from time import sleep
 import heapq
-# Now switch to UART1 for communication with Webots
 
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
-print("Starting in 5 seconds... Close Thonny and start Webots.")
-for i in range(5):
+print("Starting in 3 seconds... Close Thonny and start Webots.")
+for i in range(3):
     led_board.value(1)  # LED ON
     sleep(0.5)
     led_board.value(0)  # LED OFF
@@ -18,7 +17,6 @@ safe_pin = Pin(0, Pin.IN, Pin.PULL_UP)
 if safe_pin.value() == 0:  # pin not grounded
     print("Safe mode active, skipping loop.")
 else:
-    # uart = UART(1, 115200, tx=1, rx=3)
     def create_grid():
         grid = ([
             [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -168,14 +166,34 @@ else:
     path_index = 1  # reset path index to start of new path
     data = None       
     path = dijkstra(grid, costs, start, goal)  #generate path
-    print(path)  
     odom_goals = generate_path_goals(path)
-    print(odom_goals)
+    odom_goal = odom_goals[path_index]
+
+    #Thonny test
+    #print(path)  
+    #print("Odom goals:")
+    #for goal in odom_goals:
+     #   print(goal)
+      #  sleep(0.01)
+    #print("End of message")
+    #path_index = 0
+    #x_goal, y_goal = odom_goal
+    #sleep(0.01)
+    #print(x_goal, y_goal)
+
     uart = UART(1, 115200, tx=1, rx=3)
+
     while True:
+        goal_x, goal_y = 0, 3
+        uart.write(f'{goal_x},{goal_y}\n')
+        sleep(0.01)  # allow time for UART buffer to flush
         # Check if anything was received via serial to update sensor status
         if uart.any():
+            led_board.value(1)  # LED ON
             try:
+                goal_x, goal_y = 0, 4
+                uart.write(f'{goal_x},{goal_y}\n')
+                sleep(0.01)  # allow time for UART buffer to flush
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
                 data = msg_str.split(',')
@@ -186,7 +204,9 @@ else:
                     x = float(data[1]) 
                     y = float(data[2])
                     phi = float(data[3])
-
+                    goal_x, goal_y = 0, 5
+                    uart.write(f'{goal_x},{goal_y}\n')
+                    sleep(0.01)  # allow time for UART buffer to flush
                     current_pos = odom_to_grid(x, y)
             except Exception as e:            
                 # Blink LED rapidly 3 times to indicate UART error
@@ -198,6 +218,7 @@ else:
         
         ##################   Think   ###################
         #the obstacle detected should turn the current position into a blocked one 
+        #should become pathindex + 1 blocked
         if obstacle_detected:
             obstacle_pos = (current_pos[0], current_pos[1])
             start = current_pos
@@ -205,10 +226,7 @@ else:
             path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
             path_index = 0
             obstacle_detected = False
-        if path_index < len(odom_goals): #checks if the path_index counter is still lower than amount of checkpoints
-            odom_goal = odom_goals[path_index]
-            goal_x, goal_y = odom_goal
-
+        
         # is the goal reached?
         TOLERANCE = 0.03  # meters
         dx = goal_x - x
@@ -218,9 +236,14 @@ else:
             state_updated = True
         # Send the new state when updated
         if state_updated and path_index < len(odom_goals):
-            goal_x, goal_y = odom_goals[path_index]
+            odom_goal = odom_goals[path_index]
+            goal_x, goal_y = odom_goal
             uart.write(f'{goal_x},{goal_y}\n')
+            goal_x, goal_y = 0, 6
+            uart.write(f'{goal_x},{goal_y}\n')
+            sleep(0.01)  # allow time for UART buffer to flush
             state_updated = False
-        sleep(0.02)     # wait 
+
+        sleep(0.01)     # wait 
 
 
