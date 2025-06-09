@@ -170,28 +170,23 @@ else:
     odom_goal = odom_goals[path_index]
 
     #Thonny test
-    #print(path)  
-    #print("Odom goals:")
-    #for goal in odom_goals:
-     #   print(goal)
-      #  sleep(0.01)
-    #print("End of message")
-    #path_index = 0
-    #x_goal, y_goal = odom_goal
-    #sleep(0.01)
-    #print(x_goal, y_goal)
+    print(path)  
+    print("Odom goals:")
+    for goal in odom_goals:
+        print(goal)
+        sleep(0.01)
+    print("End of message")
+    path_index = 0
+    x_goal, y_goal = odom_goal
+    sleep(0.01)
+    print(x_goal, y_goal)
 
     uart = UART(1, 115200, tx=1, rx=3)
-
+    uart.write(odom_goal)
     while True:
         # Check if anything was received via serial to update sensor status
         if uart.any():
             led_board.value(1)  # LED ON
-            msg = uart.read()
-            print("📥 RAW UART received:", msg)
-            led_board.value(1)
-            sleep(0.8)
-            led_board.value(0)
             try:
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
@@ -236,7 +231,6 @@ else:
             goal_x, goal_y = odom_goal
             uart.write(f'{goal_x},{goal_y}\n')
             state_updated = False
-        uart.write('whatthefuckingfantasticfuck')
         sleep(0.1)     # wait 
 
 
