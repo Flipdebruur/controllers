@@ -1,7 +1,7 @@
 from machine import Pin, UART
 from time import sleep
 import heapq
-
+import struct
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
 print("Starting in 3 seconds... Close Thonny and start Webots.")
@@ -121,8 +121,6 @@ else:
         path = dijkstra(grid, costs, start, goal)
         odom_goals = generate_path_goals(path) 
         return path, odom_goals
-    col = 0
-    row = 0
     # === World-to-Grid Calibration ===
     CELL_WIDTH = 0.062       # meters
     CELL_HEIGHT = 0.0635     # meters
@@ -130,8 +128,6 @@ else:
     ORIGIN_X = 0.5           # x position  
     ORIGIN_Y = -0.34     # y position  
     HEADING = 0              # phi position
-
-    goal_list = []  # To hold the coordinate list
 
     costs = create_costs()
     grid = create_grid()
@@ -156,50 +152,46 @@ else:
         return odom_goals
 
     obstacle_pos = None # This should be set to the position of the obstacle when detected
-    current_pos = (col, row)  # Current position in the grid (row, col)
+    current_pos = (0, 0)  # Current position in the grid (row, col)
     obstacle_detected = False
-    COUNTER_MAX = 5
-    COUNTER_STOP = 50
-    state_updated = True
     start = current_pos
-    obstacle_status = 'N'
-    path_index = 0  # reset path index to start of new path
-    data = None       
-    path = dijkstra(grid, costs, start, goal)  #generate path
-    odom_goals = generate_path_goals(path)
-    odom_goal = odom_goals[path_index]
+    path, odom_goals = [], []  
 
-    #Thonny test
-    print(path)  
-    print("Odom goals:")
-    for goal in odom_goals:
-        print(goal)
-        sleep(0.01)
-    print("End of message")
-    path_index = 0
-    x_goal, y_goal = odom_goal
-    sleep(0.01)
-    print(x_goal, y_goal)
+    #start = current_pos
+    #path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
+    #x_goal, y_goal = odom_goals[1]
+    #print(f"{odom_goals}\n")
 
     uart = UART(1, 115200, tx=1, rx=3)
-    uart.write(odom_goal)
     while True:
         # Check if anything was received via serial to update sensor status
         if uart.any():
             led_board.value(1)  # LED ON
             try:
-                msg_line = uart.readline()  # safer: read one line
-                msg_str = msg_line.decode('utf-8').strip()
-                data = msg_str.split(',')
-                
+                msg = uart.readline().decode().strip()
+                data = msg.split(',')
                 if len(data) == 4:
-                    obstacle_status = data[0] # This will be 'O' or 'N'
-                    obstacle_detected = (obstacle_status == 'O')
+                    status = data[0] # This will be 'O' or 'N'
                     x = float(data[1]) 
                     y = float(data[2])
                     phi = float(data[3])
+                    
+                    if status == 'O':
+                        obstacle_detected = True
 
                     current_pos = odom_to_grid(x, y)
+                    if obstacle_detected:
+                        obstacle_pos = (current_pos[0], current_pos[1])
+                        start = current_pos
+                        # Assign both return values from pathfinder
+                        path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
+                        obstacle_detected = False 
+                start = current_pos
+                path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
+                x_goal, y_goal = odom_goals[1]
+                data = struct.pack('ff', x_goal, y_goal)  # 2 floats
+                uart.write(data)
+
             except Exception as e:            
                 # Blink LED rapidly 3 times to indicate UART error
                 for _ in range(3):
@@ -207,30 +199,7 @@ else:
                     sleep(0.1)
                     led_board.value(0)
                     sleep(0.1)
-
-        ##################   Think   ###################
-        #the obstacle detected should turn the current position into a blocked one 
-        #should become pathindex + 1 blocked
-        if obstacle_detected:
-            obstacle_pos = (current_pos[0], current_pos[1])
-            start = current_pos
-            # Assign both return values from pathfinder
-            path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
-            path_index = 0
-            obstacle_detected = False
-        # is the goal reached?
-        TOLERANCE = 0.03  # meters
-        dx = goal_x - x
-        dy = goal_y - y
-        if abs(dx) < TOLERANCE and abs(dy) < TOLERANCE: #goal reached
-            path_index += 1
-            state_updated = True
-        # Send the new state when updated
-        if state_updated and path_index < len(odom_goals):
-            odom_goal = odom_goals[path_index]
-            goal_x, goal_y = odom_goal
-            uart.write(f'{goal_x},{goal_y}\n')
-            state_updated = False
+                    
         sleep(0.1)     # wait 
 
 
