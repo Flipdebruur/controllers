@@ -74,7 +74,9 @@ last_sent_time = time.time()
 
 # Initial pose
 x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
-x_goal, y_goal = 0.5, -0.8  # Initialize with current position
+goal_recieved = False
+distance = 0.0
+x_goal, y_goal = 0.5, -0.34  # Initialize with current position
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -117,25 +119,25 @@ while robot.step(timestep) != -1:
     oldEncoderValues = encoderValues.copy()
     #print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
+    if goal_recieved:
+        # === Go-to-goal control ===
+        dx = x_goal - x
+        dy = y_goal - y
+        distance = math.hypot(dx, dy)
 
-    # === Go-to-goal control ===
-    dx = x_goal - x
-    dy = y_goal - y
-    distance = math.hypot(dx, dy)
+        # Simple proportional controller
+        angle_to_goal = math.atan2(dy, dx)
+        angle_error = angle_to_goal - phi
+        # Normalize angle error to [-pi, pi]
+        angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
-    # Simple proportional controller
-    angle_to_goal = math.atan2(dy, dx)
-    angle_error = angle_to_goal - phi
-    # Normalize angle error to [-pi, pi]
-    angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
+        # Control gains
+        K_v = 4.0   # speed gain
+        K_w = 6.0   # rotation gain
 
-    # Control gains
-    K_v = 4.0   # speed gain
-    K_w = 6.0   # rotation gain
-
-    if distance > GOAL_TOLERANCE:
-        v = K_v * distance
-        w = K_w * angle_error
+        if distance > GOAL_TOLERANCE:
+            v = K_v * distance
+            w = K_w * angle_error
     else:
         v = 0.0
         w = 0.0
@@ -151,7 +153,6 @@ while robot.step(timestep) != -1:
     leftSpeed = wl
     rightSpeed = wr
 
-
     #recieve the message from the microcontroller
     # Serial communication: if something is received, then update the current state
     if ser.in_waiting > 0:
@@ -162,18 +163,23 @@ while robot.step(timestep) != -1:
             if len(parts) == 2:
                 x_goal = float(parts[0])
                 y_goal = float(parts[1])
+                goal_received = True
                 print(f"✅ Received new goal: x={x_goal:.4f}, y={y_goal:.4f}")
             else:
                 print(f"⚠️ Unexpected goal format: '{line}'")
         except Exception as e:
             print("❌ Serial read failed:", e)
-            
-
-    msg_bytes = build_message(Obstacle, x, y, phi)
-    # Print sensor message and current state for debugging
-    print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
-
-        
+        sleep(0.01)
+  
+    current_time = time.time()
+    if current_time - last_sent_time > 0.02:
+        #send message
+        msg_bytes = build_message(Obstacle, x, y, phi)
+        print("➡️ Sending to ESP:", msg_bytes.decode())
+        ser.write(msg_bytes)  
+        # Print sensor message and current state for debugging
+        #print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
+        last_sent_time = current_time
     ############################################
     #                  Act                     #
     ############################################
@@ -181,9 +187,5 @@ while robot.step(timestep) != -1:
     # Update velocity commands for the motors
     leftMotor.setVelocity(leftSpeed)
     rightMotor.setVelocity(rightSpeed)
-   
-
-    # Send message to the microcontroller 
-    ser.write(msg_bytes)  
 
 ser.close()

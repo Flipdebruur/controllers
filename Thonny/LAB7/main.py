@@ -163,7 +163,7 @@ else:
     state_updated = True
     start = current_pos
     obstacle_status = 'N'
-    path_index = 1  # reset path index to start of new path
+    path_index = 0  # reset path index to start of new path
     data = None       
     path = dijkstra(grid, costs, start, goal)  #generate path
     odom_goals = generate_path_goals(path)
@@ -184,16 +184,15 @@ else:
     uart = UART(1, 115200, tx=1, rx=3)
 
     while True:
-        goal_x, goal_y = 0, 3
-        uart.write(f'{goal_x},{goal_y}\n')
-        sleep(0.01)  # allow time for UART buffer to flush
         # Check if anything was received via serial to update sensor status
         if uart.any():
             led_board.value(1)  # LED ON
+            msg = uart.read()
+            print("📥 RAW UART received:", msg)
+            led_board.value(1)
+            sleep(0.8)
+            led_board.value(0)
             try:
-                goal_x, goal_y = 0, 4
-                uart.write(f'{goal_x},{goal_y}\n')
-                sleep(0.01)  # allow time for UART buffer to flush
                 msg_line = uart.readline()  # safer: read one line
                 msg_str = msg_line.decode('utf-8').strip()
                 data = msg_str.split(',')
@@ -204,9 +203,7 @@ else:
                     x = float(data[1]) 
                     y = float(data[2])
                     phi = float(data[3])
-                    goal_x, goal_y = 0, 5
-                    uart.write(f'{goal_x},{goal_y}\n')
-                    sleep(0.01)  # allow time for UART buffer to flush
+
                     current_pos = odom_to_grid(x, y)
             except Exception as e:            
                 # Blink LED rapidly 3 times to indicate UART error
@@ -215,7 +212,7 @@ else:
                     sleep(0.1)
                     led_board.value(0)
                     sleep(0.1)
-        
+
         ##################   Think   ###################
         #the obstacle detected should turn the current position into a blocked one 
         #should become pathindex + 1 blocked
@@ -226,7 +223,6 @@ else:
             path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
             path_index = 0
             obstacle_detected = False
-        
         # is the goal reached?
         TOLERANCE = 0.03  # meters
         dx = goal_x - x
@@ -239,11 +235,8 @@ else:
             odom_goal = odom_goals[path_index]
             goal_x, goal_y = odom_goal
             uart.write(f'{goal_x},{goal_y}\n')
-            goal_x, goal_y = 0, 6
-            uart.write(f'{goal_x},{goal_y}\n')
-            sleep(0.01)  # allow time for UART buffer to flush
-            state_updated = True
-
-        sleep(0.01)     # wait 
+            state_updated = False
+        uart.write('whatthefuckingfantasticfuck')
+        sleep(0.1)     # wait 
 
 
