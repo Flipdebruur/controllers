@@ -65,7 +65,7 @@ for name in encoderNames:
 robot.step(timestep)
 
 # Initial pose
-x, y, phi = 0.5, -0.34, 0.0  # or whatever your starting pose is
+x, y, phi = 0.5, -0.34, 1.5708  # or whatever your starting pose is
 goal_recieved = False
 x_goal, y_goal = x, y  # Initialize with current position
 distance = 0.0
@@ -83,8 +83,8 @@ def get_robot_speeds(wl, wr, r, d):
     w = (r / d) * (wr - wl)  # angular speed [rad/s]
     return [u, w]
 def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
-    x = x_old + u * math.sin(phi_old) * delta_t
-    y = y_old + u * math.cos(phi_old) * delta_t
+    x = x_old + u * math.cos(phi_old) * delta_t
+    y = y_old + u * math.sin(phi_old) * delta_t
     phi = phi_old + w * delta_t
     return [x, y, phi]
 def build_message(Obstacle, x, y, phi):
@@ -97,7 +97,7 @@ def build_message(Obstacle, x, y, phi):
     message += f',{x:.3f},{y:.3f},{phi:.3f}'
     return bytes(message + '\n', 'UTF-8')
 def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
-    print(f"going to{x_goal}, {y_goal}")
+    print(f"going to {x_goal}, {y_goal}")
     dx = x_goal - x
     dy = y_goal - y
     distance = math.hypot(dx, dy)
@@ -106,8 +106,8 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     angle_error = angle_to_goal - phi
     angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
-    K_v = 4.0
-    K_w = 6.0
+    K_v = 3.0
+    K_w = 8.0
 
     if distance > 0.03:  # TOLERANCE
         v = K_v * distance
@@ -122,7 +122,7 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     # Saturate wheel speeds
     wl = max(-MAX_SPEED, min(MAX_SPEED, wl))
     wr = max(-MAX_SPEED, min(MAX_SPEED, wr))
-
+    #print(f"wl= {wl:.2f} wr= {wr:.2f} distance= {distance:.3f} angle_error= {angle_error:.4f} v= {v:.2f} w= {w:.2f} dx= {dx:.5f} dy= {dy:.5f}")
     return wl, wr, distance
 robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
@@ -149,6 +149,7 @@ while robot.step(timestep) != -1:
         ser.write(message.encode())
         ser.flush()
         # Wait for response
+        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
         print("wait for response")
         while ser.in_waiting == 0:
             robot.step(timestep)
@@ -157,7 +158,7 @@ while robot.step(timestep) != -1:
         print("read response")
         data = ser.read(8)  # 2 floats = 8 bytes
         if len(data) == 8:
-            x_goal, y_goal = struct.unpack('ff', data)
+            x_goal, y_goal = struct.unpack('<ff', data)
             print(f"🎯 New goal: x={x_goal}, y={y_goal}")
         else:
             print("⚠️ Incomplete binary data")

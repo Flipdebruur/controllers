@@ -122,8 +122,8 @@ else:
         odom_goals = generate_path_goals(path) 
         return path, odom_goals
     # === World-to-Grid Calibration ===
-    CELL_WIDTH = 0.062       # meters
-    CELL_HEIGHT = 0.0635     # meters
+    CELL_WIDTH = 0.0587     # meters it 'worked' at 0.0589 it should be 0.058333
+    CELL_HEIGHT = 0.0587    # meters it 'worked' at 0.0589 it should be 0.058333
     #starting position
     ORIGIN_X = 0.5           # x position  
     ORIGIN_Y = -0.34     # y position  
@@ -157,11 +157,6 @@ else:
     start = current_pos
     path, odom_goals = [], []  
 
-    #start = current_pos
-    #path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
-    #x_goal, y_goal = odom_goals[1]
-    #print(f"{odom_goals}\n")
-
     uart = UART(1, 115200, tx=1, rx=3)
     while True:
         # Check if anything was received via serial to update sensor status
@@ -186,11 +181,11 @@ else:
                         # Assign both return values from pathfinder
                         path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
                         obstacle_detected = False 
-                start = current_pos
-                path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
-                x_goal, y_goal = odom_goals[1]
-                data = struct.pack('ff', x_goal, y_goal)  # 2 floats
-                uart.write(data)
+                    start = current_pos #<<<<problem lies somewhere from here
+                    path, odom_goals = pathfinder(obstacle_pos, costs, start, goal) 
+                    x_goal, y_goal = odom_goals[1] #<<<<to here
+                    message = struct.pack('<ff', x_goal, y_goal)  # 2 floats, its been tested this works
+                    uart.write(message)
 
             except Exception as e:            
                 # Blink LED rapidly 3 times to indicate UART error
