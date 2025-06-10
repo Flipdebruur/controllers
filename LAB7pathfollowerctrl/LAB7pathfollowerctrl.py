@@ -21,6 +21,7 @@ MAX_SPEED = 6.28
 speed = 0.4 * MAX_SPEED
 leftSpeed = 0.0
 rightSpeed = 0.0
+obstacle_reported = False
 
 # create the Robot instance for the simulation.
 robot = Robot()
@@ -37,7 +38,8 @@ psNames = ['ps0', 'ps1', 'ps2', 'ps3', 'ps4', 'ps5', 'ps6', 'ps7']
 for i in range(8):
     ps.append(robot.getDevice(psNames[i]))
     ps[i].enable(timestep)
-
+psThreshold = 200
+Obstacle = False
 # motors    
 leftMotor = robot.getDevice('left wheel motor')
 rightMotor = robot.getDevice('right wheel motor')
@@ -57,7 +59,6 @@ robot.step(timestep)
 
 # Initial pose
 x, y, phi = 0.5, -0.34, 1.5708  # or whatever your starting pose is
-goal_recieved = False
 x_goal, y_goal = x, y  # Initialize with current position
 distance = 0.0
 
@@ -65,6 +66,7 @@ distance = 0.0
 R = 0.020    # wheel radius [m]
 D = 0.057    # distance between wheels [m]
 delta_t = timestep / 1000.0
+
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -88,6 +90,21 @@ def build_message(Obstacle, x, y, phi):
     message += f',{x:.3f},{y:.3f},{phi:.3f}'
     return bytes(message + '\n', 'UTF-8')
 def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
+    # Read proximity sensors values
+
+    psValues = []
+    for i in range(8):
+        psValues.append(ps[i].getValue())
+    Obstacle = (
+    psValues[0] > psThreshold or psValues[1] > psThreshold or psValues[2] > psThreshold or psValues[3] > psThreshold or
+    psValues[4] > psThreshold or psValues[5] > psThreshold or psValues[6] > psThreshold or psValues[7] > psThreshold
+    )
+    if Obstacle:
+        leftMotor.setVelocity(0)
+        rightMotor.setVelocity(0)
+        print("⚠️ Obstacle detected!")
+        print("fuck")
+        return 0.0, 0.0, 0.0, True
     #print(f"going to {x_goal}, {y_goal}")
     dx = x_goal - x
     dy = y_goal - y
@@ -121,18 +138,15 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     # Saturate wheel speeds
     wl = max(-MAX_SPEED, min(MAX_SPEED, wl))
     wr = max(-MAX_SPEED, min(MAX_SPEED, wr))
-    print(f"wl= {wl:.2f} wr= {wr:.2f} distance= {distance:.3f} angle_error= {angle_error:.4f} v= {v:.2f} w= {w:.2f} dx= {dx:.5f} dy= {dy:.5f}")
-    return wl, wr, distance
+    #print(f"wl= {wl:.2f} wr= {wr:.2f} distance= {distance:.3f} angle_error= {angle_error:.4f} v= {v:.2f} w= {w:.2f} dx= {dx:.5f} dy= {dy:.5f}")
+    return wl, wr, distance, Obstacle
+
+
 robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
 oldEncoderValues = encoderValues.copy()
 while robot.step(timestep) != -1:
     robot.step(timestep)
-    # Read proximity sensors values
-    psValues = []
-    for i in range(8):
-        psValues.append(ps[i].getValue())
-    Obstacle = psValues[0] > 600 or psValues[1] > 600 or psValues[2] > 600 or psValues[3] > 600
 
     encoderValues = [enc.getValue() for enc in encoder]
     wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
@@ -141,16 +155,23 @@ while robot.step(timestep) != -1:
     oldEncoderValues = encoderValues.copy()
     #print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
-    if distance < GOAL_TOLERANCE:
+    if (distance < GOAL_TOLERANCE) or (Obstacle and not obstacle_reported):
         print("🎯 Goal reached, requesting next")
+        if obstacle_reported:
+            Obstacle = False
         status = 'O' if Obstacle else 'N'
         message = f"{status},{x:.3f},{y:.3f},{phi:.3f}\n"
+        print(message)
         ser.write(message.encode())
         ser.flush()
+        if Obstacle:
+            obstacle_reported = True
+
         # Wait for response
-        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f}  | Distance: {distance:.3f}")
+        #print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f}  | Distance: {distance:.3f}")
         print("wait for response")
         while ser.in_waiting == 0:
+            print("wainting")
             robot.step(timestep)
             leftMotor.setVelocity(0)
             rightMotor.setVelocity(0)
@@ -163,7 +184,7 @@ while robot.step(timestep) != -1:
             print("⚠️ Incomplete binary data")
 
 
-    wl, wr, distance = go_to_goal(x, y, phi, x_goal, y_goal, D, R, MAX_SPEED)        
+    wl, wr, distance, Obstacle = go_to_goal(x, y, phi, x_goal, y_goal, D, R, MAX_SPEED)       
 
     leftSpeed = wl
     rightSpeed = wr

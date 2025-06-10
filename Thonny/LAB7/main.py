@@ -4,7 +4,7 @@ import heapq
 import struct
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
-print("Starting in 3 seconds... Close Thonny and start Webots.")
+print("Starting in 2 seconds... Close Thonny and start Webots.")
 for i in range(2):
     led_board.value(1)  # LED ON
     sleep(0.5)
@@ -116,7 +116,7 @@ else:
     def pathfinder(obstacle_pos, costs, start, goal): #calculates new cost, runs dijkstra, generates new checkpoints
         if obstacle_pos is not None:
             x, y = obstacle_pos
-            if 0 <= x < len(costs) and 0 <= y < len(costs[0]):
+            if 1 <= x < len(costs) and 1 <= y < len(costs[0]):
                 costs[x][y] = 999
         path = dijkstra(grid, costs, start, goal)
         odom_goals = generate_path_goals(path) 
@@ -132,7 +132,7 @@ else:
     costs = create_costs()
     grid = create_grid()
     start = (0, 0)
-    goal = (12, 14)
+    goal = (12, 16)
 
     def odom_to_grid(x, y): #translate odometry data to grid position
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
@@ -157,6 +157,8 @@ else:
     start = current_pos
     path, odom_goals = [], []  
 
+
+
     uart = UART(1, 115200, tx=1, rx=3)
     while True:
         # Check if anything was received via serial to update sensor status
@@ -176,10 +178,8 @@ else:
 
                     current_pos = odom_to_grid(x, y)
                     if obstacle_detected:
-                        obstacle_pos = (current_pos[0], current_pos[1])
-                        start = current_pos
-                        # Assign both return values from pathfinder
-                        path, odom_goals = pathfinder(obstacle_pos, costs, start, goal)
+                        if len(odom_goals) > 1:
+                            obstacle_pos = odom_to_grid(*odom_goals[1])  # Take the next intended goal position
                         obstacle_detected = False 
                     start = current_pos #<<<<problem lies somewhere from here
                     path, odom_goals = pathfinder(obstacle_pos, costs, start, goal) 
