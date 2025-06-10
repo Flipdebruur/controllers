@@ -5,7 +5,7 @@ import struct
 #startup sequence
 led_board = Pin(2, Pin.OUT)  # onboard LED
 print("Starting in 3 seconds... Close Thonny and start Webots.")
-for i in range(3):
+for i in range(2):
     led_board.value(1)  # LED ON
     sleep(0.5)
     led_board.value(0)  # LED OFF

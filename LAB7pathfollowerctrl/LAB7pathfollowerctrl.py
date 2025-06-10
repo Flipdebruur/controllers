@@ -85,8 +85,9 @@ delta_t = timestep / 1000.0
 LINE_THRESHOLD = 300  # Sensor value to detect a line
 LINE_FOLLOW_SPEED = 0.2  # Base speed for line following
 TURN_RATIO_FACTOR = 0.5 # How much to reduce speed on one side when turning (e.g., 0.5 means 50% of base speed)
-LOST_LINE_SEARCH_SPEED_FACTOR = 0.2 # How much to reduce speed when searching for line
-ALL_ON_LINE_STOP_SPEED = 0.0 # Speed when all sensors detect line and robot should stop
+LOST_LINE_SEARCH_SPEED_FACTOR = 1 # How much to reduce speed when searching for line
+ALL_ON_LINE_STOP_SPEED = 0.05 # Speed when all sensors detect line and robot should stop
+
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -116,16 +117,20 @@ def update_gsensors():
         gsValues.append(gs[i].getValue())
 
     # Process sensor data
-    line_right = gsValues[0] > LINE_THRESHOLD
-    line_center = gsValues[1] > LINE_THRESHOLD
-    line_left = gsValues[2] > LINE_THRESHOLD
+    line_left = gsValues[0] < LINE_THRESHOLD
+    line_center = gsValues[1] < LINE_THRESHOLD
+    line_right = gsValues[2] < LINE_THRESHOLD
+    print(gsValues[0])
+    print(gsValues[1])
+    print(gsValues[2])
     return line_right, line_center, line_left
-def linefinder(target_speed, left_motor_obj, right_motor_obj, robot_obj, timestep_val):
+def linefinder(target_speed, left_motor_obj, right_motor_obj, robot_obj, timestep_val, angle_error):
     while robot_obj.step(timestep_val) != -1:
         print("linefinding")
         # Read updated sensor values at each step
+        update_gsensors
         line_right, line_center, line_left = update_gsensors()
-
+  
         leftSpeed = 0.0
         rightSpeed = 0.0
 
@@ -157,9 +162,15 @@ def linefinder(target_speed, left_motor_obj, right_motor_obj, robot_obj, timeste
             
         else: # All sensors off line - try to find it again (e.g., move slowly forward)
               # This 'else' is crucial to prevent the robot from stopping if it momentarily loses the line.
-            leftSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR
-            rightSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * 0.5
-            #Increment a counter so it turning radius gets bigger and bigger
+            
+            if angle_error < 0:
+                # Goal is to the left
+                leftSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * 0.9
+                rightSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * -0.5
+            else:
+                # Goal is to the right
+                leftSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * -0.5
+                rightSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * 0.9
             print("Lost line, searching forward slowly.")
 
         # 3. Apply calculated speeds to motors
@@ -177,16 +188,16 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
     # Constants for tuning
-    K_v = 5.0
+    K_v = 8.0
     K_w = 10.0
-    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(2) # in degrees, adjust as needed
+    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(1) # in degrees, adjust as needed
 
     if distance > GOAL_TOLERANCE: # Still far from goal
         if abs(angle_error) > TURN_IN_PLACE_ANGLE_THRESHOLD:
             # If angle error is large, turn in place (v=0)
             v = 0.0
             w = K_w * angle_error
-
+            #linefinder(LINE_FOLLOW_SPEED, leftMotor, rightMotor, robot, timestep, angle_error)
         else:
             # Angle error is small, move towards goal and fine-tune angle
             v = K_v * distance
@@ -219,7 +230,7 @@ while robot.step(timestep) != -1:
     u, w = get_robot_speeds(wl, wr, R, D)
     x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
     oldEncoderValues = encoderValues.copy()
-    print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
+    #print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
     if distance < GOAL_TOLERANCE:
         print("🎯 Goal reached, requesting next")
@@ -239,11 +250,10 @@ while robot.step(timestep) != -1:
         if len(data) == 8:
             x_goal, y_goal = struct.unpack('<ff', data)
             print(f"🎯 New goal: x={x_goal}, y={y_goal}")
-            linefinder(LINE_FOLLOW_SPEED, leftMotor, rightMotor, robot, timestep)
+                #print(f"going to {x_goal}, {y_goal}")
+
         else:
             print("⚠️ Incomplete binary data")
-        
-
 
     wl, wr, distance = go_to_goal(x, y, phi, x_goal, y_goal, D, R, MAX_SPEED)        
 
