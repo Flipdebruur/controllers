@@ -122,8 +122,8 @@ else:
         odom_goals = generate_path_goals(path) 
         return path, odom_goals
     # === World-to-Grid Calibration ===
-    CELL_WIDTH = 0.0587     # meters it 'worked' at 0.0589 it should be 0.058333
-    CELL_HEIGHT = 0.0587    # meters it 'worked' at 0.0589 it should be 0.058333
+    CELL_WIDTH = 0.06245      # meters
+    CELL_HEIGHT = 0.0587    # meters 
     #starting position
     ORIGIN_X = 0.5           # x position  
     ORIGIN_Y = -0.34     # y position  
@@ -132,7 +132,7 @@ else:
     costs = create_costs()
     grid = create_grid()
     start = (0, 1)
-    goal = (8, 2)
+    goal = (12, 16)
 
     def odom_to_grid(x, y): #translate odometry data to grid position
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
