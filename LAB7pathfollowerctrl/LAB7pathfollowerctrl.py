@@ -1,11 +1,3 @@
-"""line_following_with_HIL controller."""
-# This program implements Hardware-in-the-Loop simulation of the e-puck robot.
-# Ground sensor data is pre-processed and transfered to an external board 
-# that must decide the next state of the robot. Communication between Webots
-# and the external board is implemented via Serial port.
-
-# Tested on Webots R2023a, on Windows 11 running Python 3.10.5 64-bit
-# communicating with MicroPython v1.25.0 on generic ESP32 module with ESP32
 
 from controller import Robot
 #-------------------------------------------------------
@@ -24,8 +16,7 @@ import struct
 
 #-------------------------------------------------------
 # Initialize variables
-
-GOAL_TOLERANCE = 0.02  # meters
+GOAL_TOLERANCE = 0.03  # meters
 MAX_SPEED = 6.28
 speed = 0.4 * MAX_SPEED
 leftSpeed = 0.0
@@ -64,13 +55,6 @@ for name in encoderNames:
 
 robot.step(timestep)
 
-# ground sensors
-gs = []
-gsNames = ['gs0', 'gs1', 'gs2']
-for i in range(3):
-    gs.append(robot.getDevice(gsNames[i]))
-    gs[i].enable(timestep)
-
 # Initial pose
 x, y, phi = 0.5, -0.34, 1.5708  # or whatever your starting pose is
 goal_recieved = False
@@ -81,13 +65,6 @@ distance = 0.0
 R = 0.020    # wheel radius [m]
 D = 0.057    # distance between wheels [m]
 delta_t = timestep / 1000.0
-# Define constants for clarity and easy tuning
-LINE_THRESHOLD = 300  # Sensor value to detect a line
-LINE_FOLLOW_SPEED = 0.2  # Base speed for line following
-TURN_RATIO_FACTOR = 0.5 # How much to reduce speed on one side when turning (e.g., 0.5 means 50% of base speed)
-LOST_LINE_SEARCH_SPEED_FACTOR = 1 # How much to reduce speed when searching for line
-ALL_ON_LINE_STOP_SPEED = 0.05 # Speed when all sensors detect line and robot should stop
-
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
     wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
@@ -110,75 +87,8 @@ def build_message(Obstacle, x, y, phi):
     
     message += f',{x:.3f},{y:.3f},{phi:.3f}'
     return bytes(message + '\n', 'UTF-8')
-def update_gsensors():
-    # Update sensor readings
-    gsValues = []
-    for i in range(3):
-        gsValues.append(gs[i].getValue())
-
-    # Process sensor data
-    line_left = gsValues[0] < LINE_THRESHOLD
-    line_center = gsValues[1] < LINE_THRESHOLD
-    line_right = gsValues[2] < LINE_THRESHOLD
-    print(gsValues[0])
-    print(gsValues[1])
-    print(gsValues[2])
-    return line_right, line_center, line_left
-def linefinder(target_speed, left_motor_obj, right_motor_obj, robot_obj, timestep_val, angle_error):
-    while robot_obj.step(timestep_val) != -1:
-        print("linefinding")
-        # Read updated sensor values at each step
-        update_gsensors
-        line_right, line_center, line_left = update_gsensors()
-  
-        leftSpeed = 0.0
-        rightSpeed = 0.0
-
-        # Priority 1: Exit condition - All sensors on the line
-        if line_center or line_left or line_right:
-            print("All sensors on line! Exiting line following loop.")
-            leftSpeed = ALL_ON_LINE_STOP_SPEED # Stop the robot
-            rightSpeed = ALL_ON_LINE_STOP_SPEED
-            
-            left_motor_obj.setVelocity(leftSpeed)
-            right_motor_obj.setVelocity(rightSpeed)
-            break # Exit the while loop
-
-        # Priority 2: Line following logic
-        elif line_center: # Only center sensor on line, go straight
-            leftSpeed = target_speed
-            rightSpeed = target_speed
-            print("Center sensor on line, going straight.")
-            
-        elif line_right: # Right sensor on line, steer left
-            leftSpeed = target_speed # Keep left wheel at target speed
-            rightSpeed = target_speed * TURN_RATIO_FACTOR # Slow down right wheel to turn left
-            print("Right sensor on line, steering left.")
-            
-        elif line_left: # Left sensor on line, steer right
-            leftSpeed = target_speed * TURN_RATIO_FACTOR # Slow down left wheel to turn right
-            rightSpeed = target_speed # Keep right wheel at target speed
-            print("Left sensor on line, steering right.")
-            
-        else: # All sensors off line - try to find it again (e.g., move slowly forward)
-              # This 'else' is crucial to prevent the robot from stopping if it momentarily loses the line.
-            
-            if angle_error < 0:
-                # Goal is to the left
-                leftSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * 0.9
-                rightSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * -0.5
-            else:
-                # Goal is to the right
-                leftSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * -0.5
-                rightSpeed = target_speed * LOST_LINE_SEARCH_SPEED_FACTOR * 0.9
-            print("Lost line, searching forward slowly.")
-
-        # 3. Apply calculated speeds to motors
-        left_motor_obj.setVelocity(leftSpeed)
-        right_motor_obj.setVelocity(rightSpeed)
-
 def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
-    print(f"going to {x_goal}, {y_goal}")
+    #print(f"going to {x_goal}, {y_goal}")
     dx = x_goal - x
     dy = y_goal - y
     distance = math.hypot(dx, dy)
@@ -187,21 +97,20 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     angle_error = angle_to_goal - phi
     angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
-    # Constants for tuning
-    K_v = 8.0
-    K_w = 10.0
-    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(1) # in degrees, adjust as needed
+    K_v = 3.0
+    K_w = 15.0
 
-    if distance > GOAL_TOLERANCE: # Still far from goal
+    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(0.5) # in degrees, adjust as needed
+
+    if distance > 0.02: # Still far from goal
         if abs(angle_error) > TURN_IN_PLACE_ANGLE_THRESHOLD:
             # If angle error is large, turn in place (v=0)
             v = 0.0
-            w = K_w * angle_error
-            #linefinder(LINE_FOLLOW_SPEED, leftMotor, rightMotor, robot, timestep, angle_error)
+            w = K_w * angle_error 
         else:
             # Angle error is small, move towards goal and fine-tune angle
             v = K_v * distance
-            w = K_w * angle_error
+            w = K_w * angle_error 
     else: # Close to goal
         v = 0.0
         w = 0.0
@@ -212,7 +121,7 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     # Saturate wheel speeds
     wl = max(-MAX_SPEED, min(MAX_SPEED, wl))
     wr = max(-MAX_SPEED, min(MAX_SPEED, wr))
-    #print(f"wl= {wl:.2f} wr= {wr:.2f} distance= {distance:.3f} angle_error= {angle_error:.4f} v= {v:.2f} w= {w:.2f} dx= {dx:.5f} dy= {dy:.5f}")
+    print(f"wl= {wl:.2f} wr= {wr:.2f} distance= {distance:.3f} angle_error= {angle_error:.4f} v= {v:.2f} w= {w:.2f} dx= {dx:.5f} dy= {dy:.5f}")
     return wl, wr, distance
 robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
@@ -239,7 +148,7 @@ while robot.step(timestep) != -1:
         ser.write(message.encode())
         ser.flush()
         # Wait for response
-        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f} | Goal: x={x_goal:.2f}, y={y_goal:.2f} | Distance: {distance:.3f}")
+        print(f"Pose: x={x:.2f}, y={y:.2f}, phi={phi:.2f}  | Distance: {distance:.3f}")
         print("wait for response")
         while ser.in_waiting == 0:
             robot.step(timestep)
@@ -250,10 +159,9 @@ while robot.step(timestep) != -1:
         if len(data) == 8:
             x_goal, y_goal = struct.unpack('<ff', data)
             print(f"🎯 New goal: x={x_goal}, y={y_goal}")
-                #print(f"going to {x_goal}, {y_goal}")
-
         else:
             print("⚠️ Incomplete binary data")
+
 
     wl, wr, distance = go_to_goal(x, y, phi, x_goal, y_goal, D, R, MAX_SPEED)        
 

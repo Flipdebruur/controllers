@@ -131,8 +131,8 @@ else:
 
     costs = create_costs()
     grid = create_grid()
-    start = (0, 1)
-    goal = (12, 16)
+    start = (0, 0)
+    goal = (12, 14)
 
     def odom_to_grid(x, y): #translate odometry data to grid position
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
