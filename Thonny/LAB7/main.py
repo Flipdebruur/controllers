@@ -132,7 +132,7 @@ else:
     costs = create_costs()
     grid = create_grid()
     start = (0, 0)
-    goal = (12, 16)
+    goal = (11, 16)
 
     def odom_to_grid(x, y): #translate odometry data to grid position
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
@@ -156,8 +156,6 @@ else:
     obstacle_detected = False
     start = current_pos
     path, odom_goals = [], []  
-
-
 
     uart = UART(1, 115200, tx=1, rx=3)
     while True:
