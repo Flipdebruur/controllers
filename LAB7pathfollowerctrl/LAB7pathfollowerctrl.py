@@ -143,9 +143,9 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
     angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
     K_v = 3.0
-    K_w = 15.0
+    K_w = 7.0
 
-    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(0.5) # in degrees, adjust as needed
+    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(3) # in degrees, adjust as needed
 
     if distance > 0.020: # Still far from goal
         if abs(angle_error) > TURN_IN_PLACE_ANGLE_THRESHOLD:
