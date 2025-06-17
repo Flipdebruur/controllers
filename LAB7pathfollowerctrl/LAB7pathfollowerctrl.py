@@ -88,7 +88,52 @@ retreat_start_time = 0.0
 RETREAT_DURATION = 1.5 # seconds to retreat backwards
 RETREAT_SPEED = 0.4 * MAX_SPEED # Speed for retreating
 # --- End of Obstacle Retreat Variables ---
+def read_proximity_sensors(ps):
+    return [sensor.getValue() for sensor in ps]
 
+def check_for_obstacle(psValues, threshold):
+    return any(val > threshold for val in psValues)
+
+def calculate_goal_info(x, y, phi, x_goal, y_goal):
+    dx = x_goal - x
+    dy = y_goal - y
+    distance = math.hypot(dx, dy)
+
+    angle_to_goal = math.atan2(dy, dx)
+    angle_error = angle_to_goal - phi
+    angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
+
+    return distance, angle_error
+
+def send_status(ser, obstacle_reported, x, y, phi):
+    status = 'O' if obstacle_reported else 'N'
+    message = f"{status},{x:.3f},{y:.3f},{phi:.3f}\n"
+    print(message)
+    ser.write(message.encode())
+    ser.flush()
+
+def wait_for_new_goal(robot, ser, motors, timestep):
+    stop_motors(motors)
+    while ser.in_waiting == 0:
+        robot.step(timestep)
+        stop_motors(motors)
+
+    data = ser.read(8)  # Expecting 2 floats
+    if len(data) == 8:
+        x_goal, y_goal = struct.unpack('<ff', data)
+        print(f"🎯 New goal: x={x_goal:.3f}, y={y_goal:.3f}")
+        return x_goal, y_goal, False  # Reset obstacle_reported
+    else:
+        print("⚠️ Incomplete binary data. Stopping.")
+        stop_motors(motors)
+        return None, None, True  # Signal failure
+
+def stop_motors(motors):
+    motors['left'].setVelocity(0)
+    motors['right'].setVelocity(0)
+
+def read_encoders(encoders):
+    return [enc.getValue() for enc in encoders]
 
 def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
@@ -120,27 +165,9 @@ def build_message(Obstacle, x, y, phi):
     return bytes(message + '\n', 'UTF-8')
 
 def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
-    # Read proximity sensors values
-
-    psValues = []
-    for i in range(8):
-        psValues.append(ps[i].getValue())
-    
-    # Determine if an obstacle is currently detected
-    is_obstacle_currently_detected = (
-        psValues[0] > psThreshold or psValues[1] > psThreshold or psValues[2] > psThreshold or psValues[3] > psThreshold or
-        psValues[4] > psThreshold or psValues[5] > psThreshold or psValues[6] > psThreshold or psValues[7] > psThreshold
-    )
-    
-    # This function now only calculates speeds for goal following.
-    # Obstacle avoidance/retreat logic is handled in the main loop.
-    dx = x_goal - x
-    dy = y_goal - y
-    distance = math.hypot(dx, dy)
-
-    angle_to_goal = math.atan2(dy, dx)
-    angle_error = angle_to_goal - phi
-    angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
+    psValues = read_proximity_sensors(ps)
+    is_obstacle_currently_detected = check_for_obstacle(psValues, psThreshold)
+    distance, angle_error = calculate_goal_info(x, y, phi, x_goal, y_goal)
 
     K_v = 3.0
     K_w = 7.0
@@ -169,6 +196,18 @@ def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
 
     return wl, wr, distance, is_obstacle_currently_detected
 
+def update_angle_tracking(phi, prev_phi, total_degrees_turned):
+    delta_phi = phi - prev_phi
+    if delta_phi > math.pi:
+        delta_phi -= 2 * math.pi
+    elif delta_phi < -math.pi:
+        delta_phi += 2 * math.pi
+
+    total_degrees_turned += math.degrees(delta_phi)
+    prev_phi = phi
+
+    return prev_phi, total_degrees_turned
+
 
 robot.step(timestep)
 encoderValues = [enc.getValue() for enc in encoder]
@@ -177,30 +216,16 @@ oldEncoderValues = encoderValues.copy()
 while robot.step(timestep) != -1:
     robot.step(timestep)
 
-    encoderValues = [enc.getValue() for enc in encoder]
+    encoderValues = read_encoders(encoder)
     wl, wr = get_wheels_speed(encoderValues, oldEncoderValues, delta_t)
     u, w = get_robot_speeds(wl, wr, R, D)
     x, y, phi = get_robot_pose(u, w, x, y, phi, delta_t)
     oldEncoderValues = encoderValues.copy()
-    #print(f"Odometry pose: x={x:.3f} m, y={y:.3f} m, phi={phi:.3f} rad")
 
     # --- Start of angle tracking logic (conditional execution) ---
     if ENABLE_ANGLE_TRACKING:
-        # Calculate the change in phi
-        delta_phi = phi - prev_phi
+        prev_phi, total_degrees_turned = update_angle_tracking(phi, prev_phi, total_degrees_turned)
 
-        # Handle angle wrapping: if the robot crosses the -pi/pi (or 0/2pi) boundary
-        if delta_phi > math.pi:
-            delta_phi -= 2 * math.pi
-        elif delta_phi < -math.pi:
-            delta_phi += 2 * math.pi
-
-        # Add the change to total_degrees_turned (now includes direction)
-        total_degrees_turned += math.degrees(delta_phi)
-        
-        # Update prev_phi for the next iteration
-        prev_phi = phi
-    # --- End of angle tracking logic ---
 
     # Get current goal-following speeds and obstacle status from go_to_goal
     # Note: wl, wr here are for potential goal following, not necessarily what is applied
@@ -239,34 +264,21 @@ while robot.step(timestep) != -1:
         print("🎯 Goal reached or obstacle handled, requesting next")
         
         # Determine status for message to microcontroller
-        status = 'O' if obstacle_reported else 'N' # If obstacle_reported is True, send 'O'
-        message = f"{status},{x:.3f},{y:.3f},{phi:.3f}\n"
-        print(message)
-        ser.write(message.encode())
-        ser.flush()
+        send_status(ser, obstacle_reported, x, y, phi)
+
 
         # Print the total degrees turned when a goal is reached or obstacle is detected (conditional)
         if ENABLE_ANGLE_TRACKING:
             print(f"Total degrees turned: {total_degrees_turned:.2f} degrees")
             
         # Wait for response from microcontroller, keeping motors at 0
-        while ser.in_waiting == 0:
-            robot.step(timestep)
-            leftMotor.setVelocity(0)
-            rightMotor.setVelocity(0)
-        
-        # Read response and process new goal
-        data = ser.read(8)  # 2 floats = 8 bytes
-        if len(data) == 8:
-            x_goal, y_goal = struct.unpack('<ff', data)
-            print(f"🎯 New goal: x={x_goal:.3f}, y={y_goal:.3f}")
-            obstacle_reported = False # Reset obstacle_reported only after a new goal is successfully received
+        x_new, y_new, failed = wait_for_new_goal(robot, ser, {'left': leftMotor, 'right': rightMotor}, timestep)
+        if not failed:
+            x_goal, y_goal = x_new, y_new
+            obstacle_reported = False
         else:
-            print("⚠️ Incomplete binary data. Stopping.")
-            # In case of incomplete data, stop the robot to prevent erratic behavior
-            leftMotor.setVelocity(0)
-            rightMotor.setVelocity(0)
-            # You might want to add more robust error handling here, e.g., re-requesting
+            break  # or add recovery logic
+
             
     else:
         # Normal goal following if not at goal, no active obstacle, and not waiting for new goal
