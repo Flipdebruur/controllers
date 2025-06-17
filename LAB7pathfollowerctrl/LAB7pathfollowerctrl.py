@@ -1,7 +1,7 @@
 from controller import Robot
 #-------------------------------------------------------
 # Open serial port to communicate with the microcontroller
-import serial
+import serial #3
 import math
 try:
     # Change the port parameter according to your system
