@@ -2,22 +2,29 @@ from machine import Pin, UART
 from time import sleep
 import heapq
 import struct
-#startup sequence
-led_board = Pin(2, Pin.OUT)  # onboard LED
+#startup sequence it either connects to webots or I can work with it in Thonny
+led_board = Pin(2, Pin.OUT)
 print("Starting in 2 seconds... Close Thonny and start Webots.")
 for i in range(2):
-    led_board.value(1)  # LED ON
+    led_board.value(1) 
     sleep(0.5)
-    led_board.value(0)  # LED OFF
+    led_board.value(0)  
     sleep(0.5)
-led_board.value(0)  # Ensure LED is OFF at the end
+led_board.value(0) 
 
 safe_pin = Pin(0, Pin.IN, Pin.PULL_UP)
 
-if safe_pin.value() == 0:  # pin not grounded
+if safe_pin.value() == 0:  # If the safe pin is pressed I can bypass the code, this way I can update my code without resetting the esp
     print("Safe mode active, skipping loop.")
 else:
-    def create_grid():
+    def create_grid(): 
+        """
+        Creates and returns a 2D grid representing the environment.
+        A value of 0 indicates a traversable path, and 1 indicates an obstacle.
+
+        Returns:
+            list[list[int]]: A 2D list representing the grid.
+        """
         grid = ([
             [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
             [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -35,7 +42,14 @@ else:
             ])
         return grid
 
-    def create_costs():
+    def create_costs(): #costs example used from Lab examples its arbitrary
+        """
+        Creates and returns a 2D array representing the cost of traversing each cell.
+        These costs are arbitrary and can be adjusted based on environmental factors.
+
+        Returns:
+            list[list[int]]: A 2D list representing the traversal costs.
+        """
         costs = [
             [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
             [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
@@ -65,7 +79,7 @@ else:
         Returns:
         - path (list of tuples): The shortest path from start to goal.
         """
-        rows, cols = len(grid), len(grid[0])
+        rows, cols = len(grid), len(grid[0]) #Example code from the labs
         visited = set()
         distances = {start: 0}  # Distance to the start node is 0
         parents = {start: None}  # A parent is the node that preceeds the current one: used to reconstruct the path
@@ -114,6 +128,23 @@ else:
         return path
 
     def pathfinder(obstacle_pos, costs, start, goal): #calculates new cost, runs dijkstra, generates new checkpoints
+        """
+        Calculates a new path based on potential obstacles and generates odometry goals.
+
+        Args:
+            obstacle_pos (tuple[int, int] or None): The grid coordinates of a detected obstacle.
+                If None, no obstacle is considered.
+            costs (list[list[int]]): The 2D array representing the cost of traversing each cell.
+            start (tuple[int, int]): The current starting coordinates (row, col) for pathfinding.
+            goal (tuple[int, int]): The final goal coordinates (row, col).
+
+        Returns:
+            tuple[list[tuple[int, int]], list[tuple[float, float]]]: A tuple containing:
+                - path (list[tuple[int, int]]): The calculated path in grid coordinates.
+                - odom_goals (list[tuple[float, float]]): The calculated path in odometry coordinates.
+        Side effects:
+            Modifies the 'costs' array by setting the cost of an 'obstacle_pos' to a very high value (999).
+        """
         if obstacle_pos is not None:
             x, y = obstacle_pos
             if 1 <= x < len(costs) and 1 <= y < len(costs[0]):
@@ -121,30 +152,60 @@ else:
         path = dijkstra(grid, costs, start, goal)
         odom_goals = generate_path_goals(path) 
         return path, odom_goals
-    # === World-to-Grid Calibration ===
+    
+    # World to grid calibration, uses the known (or measured) path and maps it to the grid points these are the relative values
     CELL_WIDTH = 0.06245      # meters
     CELL_HEIGHT = 0.0587    # meters 
     #starting position
-    ORIGIN_X = 0.5           # x position  
-    ORIGIN_Y = -0.34     # y position  
-    HEADING = 0              # phi position
+    ORIGIN_X = 0.5   
+    ORIGIN_Y = -0.34    
+    HEADING = 0              
 
     costs = create_costs()
     grid = create_grid()
     start = (0, 0)
     goal = (11, 16)
 
-    def odom_to_grid(x, y): #translate odometry data to grid position
+    def odom_to_grid(x, y):
+        """
+        Translates odometry coordinates (x, y) into grid coordinates (row, col).
+
+        Args:
+            x (float): The x-coordinate from odometry.
+            y (float): The y-coordinate from odometry.
+
+        Returns:
+            tuple[int, int]: The corresponding grid coordinates (row, col).
+        """
         col = round((x - ORIGIN_X) / -CELL_WIDTH)
         row = round((y - ORIGIN_Y) / CELL_HEIGHT)
         return (row, col)
     
-    def grid_to_odom(row, col): #translates grid position to odometry data (it's reversed)
+    def grid_to_odom(row, col): 
+        """
+        Translates grid coordinates (row, col) into odometry coordinates (x, y).
+
+        Args:
+            row (int): The row index in the grid.
+            col (int): The column index in the grid.
+
+        Returns:
+            tuple[float, float]: The corresponding odometry coordinates (x, y).
+        """
         x = ORIGIN_X - (col * CELL_WIDTH)
         y = ORIGIN_Y + (row * CELL_HEIGHT)
         return (x, y)
 
     def generate_path_goals(path):
+        """
+        Generates a list of odometry goals from a given path of grid coordinates.
+
+        Args:
+            path (list[tuple[int, int]]): A list of (row, col) tuples representing the grid path.
+
+        Returns:
+            list[tuple[float, float]]: A list of (x, y) tuples representing the odometry goals.
+        """
         odom_goals = []
         for row, col in path:
             x, y = grid_to_odom(row, col)
@@ -186,7 +247,7 @@ else:
                     uart.write(message)
 
             except Exception as e:            
-                # Blink LED rapidly 3 times to indicate UART error
+                # Blinks thrice to indicate UART error
                 for _ in range(3):
                     led_board.value(1)
                     sleep(0.1)
