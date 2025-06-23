@@ -179,10 +179,10 @@ else:
                         if len(odom_goals) > 1:
                             obstacle_pos = odom_to_grid(*odom_goals[1])  # Take the next intended goal position
                         obstacle_detected = False 
-                    start = current_pos #<<<<problem lies somewhere from here
+                    start = current_pos
                     path, odom_goals = pathfinder(obstacle_pos, costs, start, goal) 
-                    x_goal, y_goal = odom_goals[1] #<<<<to here
-                    message = struct.pack('<ff', x_goal, y_goal)  # 2 floats, its been tested this works
+                    x_goal, y_goal = odom_goals[1]
+                    message = struct.pack('<ff', x_goal, y_goal)
                     uart.write(message)
 
             except Exception as e:            

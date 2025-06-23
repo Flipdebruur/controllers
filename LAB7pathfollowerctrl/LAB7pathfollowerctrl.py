@@ -231,7 +231,7 @@ while robot.step(timestep) != -1:
     # Note: wl, wr here are for potential goal following, not necessarily what is applied
     current_wl, current_wr, distance, is_obstacle_currently_detected = go_to_goal(x, y, phi, x_goal, y_goal, D, R, MAX_SPEED)       
 
-    # --- Obstacle Handling Logic ---
+    # Obstacle Handling Logic
     if is_obstacle_currently_detected and not obstacle_reported and not retreat_active:
         # Obstacle detected for the first time, initiate retreat
         print("⚠️ Obstacle detected! Initiating retreat.")
@@ -255,9 +255,9 @@ while robot.step(timestep) != -1:
             leftMotor.setVelocity(0)
             rightMotor.setVelocity(0)
 
-    # --- Main Robot State Machine ---
+    # Main Robot State Machine
     if retreat_active:
-        # If retreating, just continue this state, do not proceed to goal following or waiting logic
+        # If retreating, continue this state, do not proceed to goal following or waiting logic
         pass # Velocities are already set for retreat
     elif (distance < GOAL_TOLERANCE) or (obstacle_reported and is_obstacle_currently_detected):
         # Goal reached, or obstacle was reported and robot is now stopped after retreat
