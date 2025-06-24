@@ -376,7 +376,7 @@ while robot.step(timestep) != -1:
 
 
     if is_obstacle_currently_detected and not obstacle_reported and not retreat_active:
-        print("⚠️ Obstacle detected! Initiating retreat.")
+        print("Obstacle detected! Initiating retreat.")
         obstacle_reported = True
         retreat_active = True
         retreat_start_time = robot.getTime()
@@ -400,7 +400,7 @@ while robot.step(timestep) != -1:
         # If retreating, continue this state
         pass 
     elif (distance < GOAL_TOLERANCE) or (obstacle_reported and is_obstacle_currently_detected):
-        print("🎯 Goal reached or obstacle handled, requesting next")
+        print("Goal reached or obstacle handled, requesting next")
         
         send_status(ser, obstacle_reported, x, y, phi)
 
