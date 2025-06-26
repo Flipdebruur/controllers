@@ -15,6 +15,11 @@ ORIGIN_X = 0.0
 ORIGIN_Y = 0.0
 LINE_THRESHOLD = 600
 MAX_SPEED = 6.28
+BASE_SPEED = 1.2
+Kp = 0.006
+Kd = 0.008
+OBSTACLE_THRESHOLD = 80.0
+NODE_DEBOUNCE_TIME = 40
 
 # === Setup Robot ===
 robot = Robot()
@@ -29,7 +34,6 @@ left_motor.setVelocity(0.0)
 right_motor.setVelocity(0.0)
 
 # Sensors
-# Use 3 ground sensors for simulation; update to 5 when deploying on real hardware
 gs = [robot.getDevice(f"gs{i}") for i in range(3)]
 for g in gs:
     if g is not None:
@@ -53,31 +57,12 @@ class State:
 
 current_state = State.INIT
 
-# === Pathfinding ===
+# === Pathfinding Functions ===
 def create_grid():
-    return [
-        [0,1,0,1,0,1,0,1,1,1,1,1,1,1,1,1,1],
-        [0,1,0,1,0,1,0,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0],
-        [0,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0],
-        [0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0],
-        [0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0],
-        [0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0],
-        [1,1,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0]
-    ]
+    return [[0]*17 for _ in range(13)]
 
 def create_costs():
     return [[1]*17 for _ in range(13)]
-
-def mark_obstacle(costs, grid_pos):
-    row, col = grid_pos
-    if 0 <= row < len(costs) and 0 <= col < len(costs[0]):
-        costs[row][col] = 999
 
 def dijkstra(grid, costs, start, goal):
     rows, cols = len(grid), len(grid[0])
@@ -117,35 +102,139 @@ def grid_to_odom(row, col):
     y = ORIGIN_Y + row * CELL_HEIGHT
     return (x, y)
 
-def odom_to_grid(x, y):
-    col = round((x - ORIGIN_X) / -CELL_WIDTH)
-    row = round((y - ORIGIN_Y) / CELL_HEIGHT)
-    return (row, col)
+def angle_between(n1, n2):
+    x1, y1 = grid_to_odom(*n1)
+    x2, y2 = grid_to_odom(*n2)
+    return math.atan2(y2 - y1, x2 - x1)
 
-def generate_path_goals(path):
-    return [grid_to_odom(r, c) for r, c in path]
+def angle_diff(a1, a2):
+    diff = a2 - a1
+    while diff > math.pi:
+        diff -= 2 * math.pi
+    while diff < -math.pi:
+        diff += 2 * math.pi
+    return math.degrees(diff)
 
-# === Obstacle Handling in State Machine ===
-# In OBSTACLE_AVOIDANCE state:
-# - stop motors
-# - mark current node as blocked
-# - rerun Dijkstra
-# - reset path and continue
-# (This part is now built-in and updates dynamically based on the position)
+def determine_turn(prev, curr, nxt):
+    a1 = angle_between(prev, curr)
+    a2 = angle_between(curr, nxt)
+    diff = angle_diff(a1, a2)
+    if abs(diff) < 30:
+        return "forward"
+    elif diff > 0:
+        return "turn_left"
+    else:
+        return "turn_right"
 
-# === Checklist ===
-# - [x] Stepper + magnet box pickup (placeholder, not yet implemented)
-# - [x] Grid and cost map
-# - [x] Dynamic cost update with obstacle detection
-# - [x] 5 ground sensors (simulated with 3 for now)
-# - [x] 2 proximity sensors
-# - [x] Start-goal path with Dijkstra
-# - [x] Full course loop with turning logic
-# - [x] Node detection + handling
-# - [ ] Touch sensor check & box pickup logic
-# - [ ] Return & drop-off sequence
+def execute_turn_left():
+    left_motor.setVelocity(-1.5)
+    right_motor.setVelocity(2.5)
+    robot.step(13 * timestep)
 
-# === TO DO ===
-# - Encoder integration for backtracking on obstacle
-# - Magnet + box pick-up routine
-# - Drop-off logic when all 4 boxes are collected
+def execute_turn_right():
+    left_motor.setVelocity(2.5)
+    right_motor.setVelocity(-1.5)
+    robot.step(13 * timestep)
+
+def is_node_detected():
+    return all(sensor.getValue() < LINE_THRESHOLD for sensor in gs)
+
+def line_follow():
+    global previous_error
+    left = gs[0].getValue()
+    center = gs[1].getValue()
+    right = gs[2].getValue()
+
+    if center < LINE_THRESHOLD:
+        error = right - left
+    else:
+        if left < LINE_THRESHOLD:
+            error = -1000
+        elif right < LINE_THRESHOLD:
+            error = 1000
+        else:
+            error = 0
+
+    derivative = error - previous_error
+    previous_error = error
+    correction = Kp * error + Kd * derivative
+
+    left_speed = max(min(BASE_SPEED - correction, MAX_SPEED), 0.7)
+    right_speed = max(min(BASE_SPEED + correction, MAX_SPEED), 0.7)
+
+    left_motor.setVelocity(left_speed)
+    right_motor.setVelocity(right_speed)
+
+def is_obstacle_detected():
+    return any(p.getValue() > OBSTACLE_THRESHOLD for p in ps)
+
+# === Runtime Variables ===
+previous_error = 0
+node_detected_cooldown = 0
+curr_index = 1
+prev_node = None
+
+# === Main Control Loop ===
+grid = create_grid()
+costs = create_costs()
+start = (0, 0)
+goals = [(12, 10), (12, 12), (12, 14), (12, 16)]
+box_counter = 0
+path = []
+
+while robot.step(timestep) != -1:
+    if current_state == State.INIT:
+        current_goal = goals[box_counter]
+        path = dijkstra(grid, costs, start, current_goal)
+        print(f"Initial path to box {box_counter+1}: {path}")
+        prev_node = path[0]
+        curr_index = 1
+        current_state = State.LINE_FOLLOW
+
+    elif current_state == State.LINE_FOLLOW:
+        if is_obstacle_detected():
+            print("Obstacle detected!")
+            left_motor.setVelocity(0)
+            right_motor.setVelocity(0)
+            current_state = State.OBSTACLE_AVOIDANCE
+            continue
+
+        if node_detected_cooldown > 0:
+            node_detected_cooldown -= 1
+
+        if node_detected_cooldown == 0 and is_node_detected():
+            print("Node detected!")
+            node_detected_cooldown = NODE_DEBOUNCE_TIME
+            current_state = State.NODE_DETECTED
+        else:
+            line_follow()
+
+    elif current_state == State.NODE_DETECTED:
+        if curr_index < len(path):
+            curr_node = path[curr_index - 1]
+            next_node = path[curr_index]
+            direction = determine_turn(prev_node, curr_node, next_node)
+            print(f"Turning from {curr_node} to {next_node}: {direction}")
+            if direction == "turn_left":
+                execute_turn_left()
+            elif direction == "turn_right":
+                execute_turn_right()
+            prev_node = curr_node
+            curr_index += 1
+        else:
+            print("Reached final node in path.")
+            current_state = State.GOAL_REACHED
+        current_state = State.LINE_FOLLOW
+
+    elif current_state == State.OBSTACLE_AVOIDANCE:
+        print("[OBSTACLE_AVOIDANCE] Stopping. Replanning... (TODO)")
+        current_state = State.IDLE
+
+    elif current_state == State.GOAL_REACHED:
+        print("Goal reached! Placeholder for pickup.")
+        current_state = State.IDLE
+
+    elif current_state == State.IDLE:
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
+        break
