@@ -1,327 +1,76 @@
-#MAGGIE is a robot that has a stepper motor that moves a belt with a magnet on it so it can grab boxes with a magnetic strip
-#this code needs to control said robot
-#it will move on a predeterimed grid that we can measure 
-#it has line sensors in the form of 5 ground sensors and 2 proximity sensons for obstacles
-#it has 2 wheels and a swivel wheel that isnt powered just for balance
-#it has to go the course pick up 4 boxes return through the course and unload the 4 boxes in 4 separate coordinates
+# === MAGGIE Full Robot Controller ===
+# MAGGIE is a robot that has a stepper motor that moves a belt with a magnet on it so it can grab boxes with a magnetic strip
+# This code controls MAGGIE on a predetermined grid using 3 (simulated) ground sensors, 2 proximity sensors, 2 wheels and 1 swivel wheel.
+# It must go the course, pick up 4 boxes, return, and unload them at specific coordinates.
 
-def create_grid(): 
-    """
-    Creates and returns a 2D grid representing the environment.
-    A value of 0 indicates a traversable path, and 1 indicates an obstacle.
+from controller import Robot
+import math
+import heapq
+import time
 
-    Returns:
-        list[list[int]]: A 2D list representing the grid.
-    """
-    grid = ([
-        [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0]
-        ])
-    return grid
+# === Constants ===
+CELL_WIDTH = 0.06245
+CELL_HEIGHT = 0.0587
+ORIGIN_X = 0.0 # Assuming (0,0) of the grid maps to (0,0) in odometry based on J node. Adjust if your grid origin is different.
+ORIGIN_Y = 0.0 # Assuming (0,0) of the grid maps to (0,0) in odometry based on J node. Adjust if your grid origin is different.
+LINE_THRESHOLD = 600
+MAX_SPEED = 6.28
+BASE_SPEED = 1.2
+Kp = 0.006
+Kd = 0.008
+OBSTACLE_THRESHOLD = 100.0
+NODE_DEBOUNCE_TIME = 40
+NODE_MATCH_TOLERANCE = 0.01 # Tolerance for matching odometry coordinates to named nodes (in meters)
 
-def create_costs(): #costs example used from Lab examples its arbitrary
-    """
-    Creates and returns a 2D array representing the cost of traversing each cell.
-    These costs are arbitrary and can be adjusted based on environmental factors.
+# Robot physical parameters for odometry
+WHEEL_RADIUS = 0.0205  # Approximate wheel radius in meters (you might need to adjust this)
+WHEEL_DISTANCE = 0.052  # Distance between the centers of the two wheels in meters (you might need to adjust this)
 
-    Returns:
-        list[list[int]]: A 2D list representing the traversal costs.
-    """
-    costs = [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,]
-    ]
-    return costs
+# Named node positions corresponding to odometry data
+node_positions = {
+    'X': (-0.5, 0.36), 'Y': (-0.4, 0.36), 'Z': (-0.3, 0.36), 'ZZ': (-0.2, 0.36),
+    'A': (-0.5, 0.25), 'B': (-0.4, 0.25), 'C': (-0.3, 0.25), 'D': (-0.2, 0.25), 'E': (0.0, 0.25), 'F': (0.5, 0.25),
+    'G': (0.0, 0.1), 'H': (0.5, 0.1),
+    'I': (-0.5, 0.0), 'J': (0.0, 0.0), 'K': (0.5, 0.0),
+    'L': (-0.5, -0.1), 'M': (0.0, -0.1),
+    'N': (-0.5, -0.25), 'O': (0.0, -0.25), 'P': (0.2, -0.25), 'Q': (0.3, -0.25), 'R': (0.4, -0.25), 'S': (0.5, -0.25),
+    'T': (0.2, -0.36), 'U': (0.3, -0.36), 'V': (0.4, -0.36), 'W': (0.5, -0.36)
+}
 
-def dijkstra(grid, costs, start, goal):
-    """
-    Implements Dijkstra's Algorithm for a grid-based environment.
-    Args:
-    - grid (2D array): The environment grid.
-    - costs (2D array): The cost of moving through each cell.
-    - start (tuple): The start node (row, col).
-    - goal (tuple): The goal node (row, col).
+# === Setup Robot ===
+robot = Robot()
+timestep = int(robot.getBasicTimeStep())
+delta_t = timestep / 1000.0  # Convert timestep to seconds
 
-    Returns:
-    - path (list of tuples): The shortest path from start to goal.
-    """
-    rows, cols = len(grid), len(grid[0]) #Example code from the labs
-    visited = set()
-    distances = {start: 0}  # Distance to the start node is 0
-    parents = {start: None}  # A parent is the node that preceeds the current one: used to reconstruct the path
+# Motors
+left_motor = robot.getDevice("left wheel motor")
+right_motor = robot.getDevice("right wheel motor")
+left_motor.setPosition(float('inf'))
+right_motor.setPosition(float('inf'))
+left_motor.setVelocity(0.0)
+right_motor.setVelocity(0.0)
 
-    priority_queue = []  # Priority queue ensures that nodes are processed in order of increasing distance
-    heapq.heappush(priority_queue, (0, start))  # Initializes queue with the start node and distance to start
+# Sensors
+gs = [robot.getDevice(f"gs{i}") for i in range(3)]
+for g in gs:
+    if g is not None:
+        g.enable(timestep)
 
-    directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]  # Right, Down, Left, Up
+ps = [robot.getDevice("ps0"), robot.getDevice("ps1")]
+for p in ps:
+    if p is not None:
+        p.enable(timestep)
 
-    while priority_queue:
-        current_distance, current_node = heapq.heappop(priority_queue)
+# Encoders (PositionSensors for wheels)
+left_encoder = robot.getDevice("left wheel sensor")
+right_encoder = robot.getDevice("right wheel sensor")
+if left_encoder is not None:
+    left_encoder.enable(timestep)
+if right_encoder is not None:
+    right_encoder.enable(timestep)
+encoders = [left_encoder, right_encoder]
 
-        #  If a node has already been visited, it means the shortest distance to that node has been determined.
-        if current_node in visited:
-            continue 
-        visited.add(current_node)
-
-        # If the current node is the goal node, then the path has been found.
-        if current_node == goal:
-            break
-
-        # Gets the coordinates of each neighboring cell
-        for direction in directions:
-            neighbor = (current_node[0] + direction[0], current_node[1] + direction[1])
-
-            # Can only move within the boundaries of the world, and if there's no obstacle
-            if (0 <= neighbor[0] < rows and 0 <= neighbor[1] < cols and grid[neighbor[0]][neighbor[1]] == 0):
-                distance = current_distance + costs[neighbor[0]][neighbor[1]]  # Use cost from the `costs` array
-
-                # Updates the shortest known distance to a neighboring node and prepares it for further exploration
-                if neighbor not in distances or distance < distances[neighbor]:
-                    distances[neighbor] = distance  # Updates the shortest known distance to the neighbor
-                    parents[neighbor] = current_node # Makes the current node be the parent of the neighbor to reconstruct the shortest path
-                    heapq.heappush(priority_queue, (distance, neighbor))  # Adds the neighbor to the priority queue with its updated distance as the priority
-
-    # Reconstruct path from the goal to the start
-    path = []
-    node = goal
-    while node is not None:
-        if node not in parents:
-            print(f"Error: Node {node} has no parent. Path reconstruction failed.")
-            return []
-        path.append(node)
-        node = parents[node]  # Gets the parent of the node
-    path.reverse()  # Reverse the path to make it from start to the goal node
-    return path
-
-def pathfinder(obstacle_pos, costs, start, goal): #calculates new cost, runs dijkstra, generates new checkpoints
-    """
-    Calculates a new path based on potential obstacles and generates odometry goals.
-
-    Args:
-        obstacle_pos (tuple[int, int] or None): The grid coordinates of a detected obstacle.
-            If None, no obstacle is considered.
-        costs (list[list[int]]): The 2D array representing the cost of traversing each cell.
-        start (tuple[int, int]): The current starting coordinates (row, col) for pathfinding.
-        goal (tuple[int, int]): The final goal coordinates (row, col).
-
-    Returns:
-        tuple[list[tuple[int, int]], list[tuple[float, float]]]: A tuple containing:
-            - path (list[tuple[int, int]]): The calculated path in grid coordinates.
-            - odom_goals (list[tuple[float, float]]): The calculated path in odometry coordinates.
-    Side effects:
-        Modifies the 'costs' array by setting the cost of an 'obstacle_pos' to a very high value (999).
-    """
-    if obstacle_pos is not None:
-        x, y = obstacle_pos
-        if 1 <= x < len(costs) and 1 <= y < len(costs[0]):
-            costs[x][y] = 999
-    path = dijkstra(grid, costs, start, goal)
-    odom_goals = generate_path_goals(path) 
-    return path, odom_goals
-
-# World to grid calibration, uses the known (or measured) path and maps it to the grid points these are the relative values
-# the following 2 are how many meters correspond to a grid point
-CELL_WIDTH = 0.06245      # meters
-CELL_HEIGHT = 0.0587    # meters           
-
-costs = create_costs()
-grid = create_grid()
-start = (0, 0)
-Box_1 = (16, 10)
-Box_2 = (16, 12)
-Box_3 = (16, 14)
-Box_4 = (16, 16)
-
-def odom_to_grid(x, y):
-    """
-    Translates odometry coordinates (x, y) into grid coordinates (row, col).
-
-    Args:
-        x (float): The x-coordinate from odometry.
-        y (float): The y-coordinate from odometry.
-
-    Returns:
-        tuple[int, int]: The corresponding grid coordinates (row, col).
-    """
-    col = round((x - ORIGIN_X) / -CELL_WIDTH)
-    row = round((y - ORIGIN_Y) / CELL_HEIGHT)
-    return (row, col)
-
-def grid_to_odom(row, col): 
-    """
-    Translates grid coordinates (row, col) into odometry coordinates (x, y).
-
-    Args:
-        row (int): The row index in the grid.
-        col (int): The column index in the grid.
-
-    Returns:
-        tuple[float, float]: The corresponding odometry coordinates (x, y).
-    """
-    x = ORIGIN_X - (col * CELL_WIDTH)
-    y = ORIGIN_Y + (row * CELL_HEIGHT)
-    return (x, y)
-
-def generate_path_goals(path):
-    """
-    Generates a list of odometry goals from a given path of grid coordinates.
-
-    Args:
-        path (list[tuple[int, int]]): A list of (row, col) tuples representing the grid path.
-
-    Returns:
-        list[tuple[float, float]]: A list of (x, y) tuples representing the odometry goals.
-    """
-    odom_goals = []
-    for row, col in path:
-        x, y = grid_to_odom(row, col)
-        odom_goals.append((x, y))
-    return odom_goals
-
-obstacle_pos = None # This should be set to the position of the obstacle when detected
-current_pos = (0, 0)  # Current position in the grid (row, col)
-obstacle_detected = False
-start = current_pos
-path, odom_goals = [], []  
-
-def read_proximity_sensors(ps):
-    """
-    Reads the current values from all enabled proximity sensors.
-
-    Args:
-        ps (list): A list of Webots ProximitySensor objects.
-
-    Returns:
-        list[float]: A list of sensor values.
-    """
-    return [sensor.getValue() for sensor in ps]
-
-def check_for_obstacle(psValues, threshold):
-    """
-    Checks if any proximity sensor detects an obstacle above a given threshold.
-
-    Args:
-        psValues (list[float]): A list of proximity sensor values.
-        threshold (float): The threshold value above which an obstacle is considered detected.
-
-    Returns:
-        bool: True if an obstacle is detected, False otherwise.
-    """
-    return any(val > threshold for val in psValues)
-
-def calculate_goal_info(x, y, phi, x_goal, y_goal):
-    """
-    Calculates the distance and angle error to the current goal.
-
-    Args:
-        x (float): Current x-coordinate of the robot.
-        y (float): Current y-coordinate of the robot.
-        phi (float): Current orientation (heading) of the robot in radians.
-        x_goal (float): X-coordinate of the target goal.
-        y_goal (float): Y-coordinate of the target goal.
-
-    Returns:
-        tuple[float, float]: A tuple containing:
-            - distance (float): Euclidean distance to the goal.
-            - angle_error (float): Angular difference between robot's heading and direction to goal.
-    """
-    dx = x_goal - x
-    dy = y_goal - y
-    distance = math.hypot(dx, dy)
-
-    angle_to_goal = math.atan2(dy, dx)
-    angle_error = angle_to_goal - phi
-    angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
-
-    return distance, angle_error
-
-def send_status(ser, obstacle_reported, x, y, phi):
-    """
-    Sends the robot's current status (obstacle detected, x, y, phi) over serial.
-
-    Args:
-        ser (serial.Serial): The serial port object.
-        obstacle_reported (bool): True if an obstacle was reported in the current cycle, False otherwise.
-        x (float): Current x-coordinate of the robot.
-        y (float): Current y-coordinate of the robot.
-        phi (float): Current orientation (heading) of the robot in radians.
-    Side effects:
-        Writes data to the serial port.
-    """
-    status = 'O' if obstacle_reported else 'N'
-    message = f"{status},{x:.3f},{y:.3f},{phi:.3f}\n"
-    print(message)
-    ser.write(message.encode())
-    ser.flush()
-
-def wait_for_new_goal(robot, ser, motors, timestep):
-    """
-    Halts the robot and waits for a new goal message from the serial port.
-
-    Args:
-        robot (controller.Robot): The Webots Robot object.
-        ser (serial.Serial): The serial port object.
-        motors (dict): A dictionary containing 'left' and 'right' motor objects.
-        timestep (int): The simulation timestep in milliseconds.
-
-    Returns:
-        tuple[float or None, float or None, bool]: A tuple containing:
-            - x_goal (float or None): New x-coordinate of the goal, or None if data is incomplete.
-            - y_goal (float or None): New y-coordinate of the goal, or None if data is incomplete.
-            - failed (bool): True if data is incomplete, False otherwise.
-    Side effects:
-        Stops the robot motors.
-        Reads data from the serial port.
-    """
-    stop_motors(motors)
-    while ser.in_waiting == 0:
-        robot.step(timestep)
-        stop_motors(motors)
-
-    data = ser.read(8)  # Expecting 2 floats
-    if len(data) == 8:
-        x_goal, y_goal = struct.unpack('<ff', data)
-        print(f"New goal: x={x_goal:.3f}, y={y_goal:.3f}")
-        return x_goal, y_goal, False  # Reset obstacle_reported
-    else:
-        print("Incomplete data, Stopping.")
-        stop_motors(motors)
-        return None, None, True  # Signal failure
-
-def stop_motors(motors):
-    """
-    Sets the velocity of both left and right motors to zero, effectively stopping the robot.
-
-    Args:
-        motors (dict): A dictionary containing 'left' and 'right' motor objects.
-    Side effects:
-        Sets motor velocities.
-    """
-    motors['left'].setVelocity(0)
-    motors['right'].setVelocity(0)
-
+# === Odometry Functions ===
 def read_encoders(encoders):
     """
     Reads the current values from all enabled wheel encoders.
@@ -347,7 +96,7 @@ def get_wheels_speed(encoderValues, oldEncoderValues, delta_t):
         list[float]: A list containing the angular speed of the left wheel (wl) and right wheel (wr) in rad/s.
     """
     wl = (encoderValues[0] - oldEncoderValues[0]) / delta_t  # left wheel speed [rad/s]
-    wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t    # right wheel speed [rad/s]
+    wr = (encoderValues[1] - oldEncoderValues[1]) / delta_t  # right wheel speed [rad/s]
     return [wl, wr]
 
 def get_robot_speeds(wl, wr, r, d):
@@ -382,122 +131,314 @@ def get_robot_pose(u, w, x_old, y_old, phi_old, delta_t):
     Returns:
         list[float]: A list containing the updated x, y, and phi coordinates.
     """
-    x = x_old + u * math.cos(phi_old) * delta_t
-    y = y_old + u * math.sin(phi_old) * delta_t
-    phi = phi_old + w * delta_t
+    # If angular speed is very small, robot is moving in a straight line
+    if abs(w) < 1e-6: # Using a small threshold to avoid division by zero or large errors from floating point inaccuracies
+        x = x_old + u * math.cos(phi_old) * delta_t
+        y = y_old + u * math.sin(phi_old) * delta_t
+        phi = phi_old
+    else:
+        # Calculate radius of curvature
+        R_curve = u / w
+        # Calculate change in angle
+        d_phi = w * delta_t
+        
+        # Calculate new x and y using arc movement equations
+        x = x_old - R_curve * math.sin(phi_old) + R_curve * math.sin(phi_old + d_phi)
+        y = y_old + R_curve * math.cos(phi_old) - R_curve * math.cos(phi_old + d_phi)
+        phi = phi_old + d_phi
+    
+    # Normalize phi to be within -pi to pi
     phi = math.atan2(math.sin(phi), math.cos(phi))
     return [x, y, phi]
 
-def build_message(Obstacle, x, y, phi):
+# === States ===
+class State:
+    INIT = 0
+    LINE_FOLLOW = 1
+    NODE_DETECTED = 2
+    OBSTACLE_AVOIDANCE = 3
+    GOAL_REACHED = 4
+    RETURN_TO_BASE = 5
+    DROP_OFF = 6
+    IDLE = 7
+
+current_state = State.INIT
+
+# === Pathfinding Functions ===
+def create_grid():
+    # Example grid size, adjust to match your map
+    return [[0]*17 for _ in range(13)]
+
+def create_costs():
+    return [[1]*17 for _ in range(13)]
+
+def dijkstra(grid, costs, start, goal):
+    rows, cols = len(grid), len(grid[0])
+    visited = set()
+    distances = {start: 0}
+    parents = {start: None}
+    queue = [(0, start)]
+    directions = [(0,1), (1,0), (0,-1), (-1,0)]
+
+    while queue:
+        dist, node = heapq.heappop(queue)
+        if node in visited:
+            continue
+        visited.add(node)
+        if node == goal:
+            break
+
+        for dx, dy in directions:
+            nx, ny = node[0] + dx, node[1] + dy
+            if 0 <= nx < rows and 0 <= ny < cols and grid[nx][ny] == 0:
+                cost = dist + costs[nx][ny]
+                if (nx, ny) not in distances or cost < distances[(nx, ny)]:
+                    distances[(nx, ny)] = cost
+                    parents[(nx, ny)] = node
+                    heapq.heappush(queue, (cost, (nx, ny)))
+
+    path = []
+    node = goal
+    while node:
+        path.append(node)
+        node = parents[node]
+    path.reverse()
+    return path
+
+def grid_to_odom(row, col):
+    """Converts grid (row, col) to odometry (x, y) coordinates."""
+    x = ORIGIN_X - col * CELL_WIDTH
+    y = ORIGIN_Y + row * CELL_HEIGHT
+    return (x, y)
+
+def get_node_name_from_odom(current_x, current_y, tolerance=NODE_MATCH_TOLERANCE):
     """
-    Constructs a status message string for serial communication.
+    Checks if the current odometry coordinates match any known named node positions.
 
     Args:
-        Obstacle (bool): True if an obstacle is detected, False otherwise.
-        x (float): Current x-coordinate of the robot.
-        y (float): Current y-coordinate of the robot.
-        phi (float): Current orientation (heading) of the robot in radians.
+        current_x (float): Robot's current x-coordinate.
+        current_y (float): Robot's current y-coordinate.
+        tolerance (float): Maximum distance for a match.
 
     Returns:
-        bytes: The encoded status message.
+        str or None: The name of the matching node (e.g., 'A', 'J') or None if no match.
     """
-    message = ''
-    if Obstacle:
-        message += 'O'
+    for name, (node_x, node_y) in node_positions.items():
+        distance = math.sqrt((current_x - node_x)**2 + (current_y - node_y)**2)
+        if distance <= tolerance:
+            return name
+    return None
+
+def angle_between(n1, n2):
+    """
+    Calculates the angle (in radians) between two grid nodes.
+    Uses grid_to_odom for coordinate conversion.
+    """
+    x1, y1 = grid_to_odom(*n1)
+    x2, y2 = grid_to_odom(*n2)
+    return math.atan2(y2 - y1, x2 - x1)
+
+def angle_diff(a1, a2):
+    """Calculates the shortest angular difference between two angles in degrees."""
+    diff = a2 - a1
+    while diff > math.pi:
+        diff -= 2 * math.pi
+    while diff < -math.pi:
+        diff += 2 * math.pi
+    return math.degrees(diff)
+
+def determine_turn(prev, curr, nxt):
+    """
+    Determines the type of turn needed (forward, turn_left, turn_right)
+    based on three consecutive grid nodes.
+    """
+    a1 = angle_between(prev, curr)
+    a2 = angle_between(curr, nxt)
+    diff = angle_diff(a1, a2)
+    if abs(diff) < 30: # Within 30 degrees, consider it mostly straight
+        return "forward"
+    elif diff > 0: # Positive difference means turn left
+        return "turn_left"
+    else: # Negative difference means turn right
+        return "turn_right"
+
+def execute_turn_left():
+    left_motor.setVelocity(-1.5)
+    right_motor.setVelocity(2.5)
+    robot.step(13 * timestep) # This step duration might need tuning based on actual turn
+
+def execute_turn_right():
+    left_motor.setVelocity(2.5)
+    right_motor.setVelocity(-1.5)
+    robot.step(13 * timestep) # This step duration might need tuning based on actual turn
+
+def is_node_detected():
+    return all(sensor.getValue() < LINE_THRESHOLD for sensor in gs)
+
+def line_follow():
+    global previous_error
+    left = gs[0].getValue()
+    center = gs[1].getValue()
+    right = gs[2].getValue()
+
+    if center < LINE_THRESHOLD:
+        error = right - left
     else:
-        message += 'N'
-    
-    message += f',{x:.3f},{y:.3f},{phi:.3f}'
-    return bytes(message + '\n', 'UTF-8')
-
-def go_to_goal(x, y, phi, x_goal, y_goal, R, D, MAX_SPEED):
-    """
-    Calculates the required wheel velocities to move the robot towards a goal,
-    considering obstacle detection and turning behavior.
-
-    Args:
-        x (float): Current x-coordinate of the robot.
-        y (float): Current y-coordinate of the robot.
-        phi (float): Current orientation (heading) of the robot in radians.
-        x_goal (float): X-coordinate of the target goal.
-        y_goal (float): Y-coordinate of the target goal.
-        D (float): Distance between the wheels in meters.
-        R (float): Wheel radius in meters.
-        MAX_SPEED (float): Maximum allowable wheel speed.
-
-    Returns:
-        tuple[float, float, float, bool]: A tuple containing:
-            - wl (float): Calculated left wheel velocity.
-            - wr (float): Calculated right wheel velocity.
-            - distance (float): Current distance to the goal.
-            - is_obstacle_currently_detected (bool): True if an obstacle is currently detected.
-    Side effects:
-        Reads proximity sensor values.
-    """
-    psValues = read_proximity_sensors(ps)
-    is_obstacle_currently_detected = check_for_obstacle(psValues, psThreshold)
-    distance, angle_error = calculate_goal_info(x, y, phi, x_goal, y_goal)
-
-    K_v = 3.0
-    K_w = 7.0
-
-    TURN_IN_PLACE_ANGLE_THRESHOLD = math.radians(2) # in degrees
-
-    if distance > 0.020: # Still far from goal
-        if abs(angle_error) > TURN_IN_PLACE_ANGLE_THRESHOLD:
-            # If angle error is large, turn in place (v=0)
-            v = 0.0
-            w = K_w * angle_error 
+        if left < LINE_THRESHOLD:
+            error = -1000
+        elif right < LINE_THRESHOLD:
+            error = 1000
         else:
-            # Angle error is small, move towards goal and fine-tune angle
-            v = K_v * distance
-            w = K_w * angle_error 
-    else: # Close to goal
-        v = 0.0
-        w = 0.0
+            error = 0
 
-    wl = (v - w * D / 2) / R
-    wr = (v + w * D / 2) / R
+    derivative = error - previous_error
+    previous_error = error
+    correction = Kp * error + Kd * derivative
 
-    # Saturate wheel speeds
-    wl = max(-MAX_SPEED, min(MAX_SPEED, wl))
-    wr = max(-MAX_SPEED, min(MAX_SPEED, wr))
+    left_speed = max(min(BASE_SPEED - correction, MAX_SPEED), 0.7)
+    right_speed = max(min(BASE_SPEED + correction, MAX_SPEED), 0.7)
 
-    return wl, wr, distance, is_obstacle_currently_detected
+    left_motor.setVelocity(left_speed)
+    right_motor.setVelocity(right_speed)
 
-on = #pin no.##
-#init
-#grid Intersection as a 2d array
-#costs same array as grid but the values will differ and be updated when an obstalce gets detected
-#start goal and end goals 
-#run initial dijkstra get initial route
-#if on = True
-#loop start
-    #read sensors
-    #encoder start
-    #store grid coordinates
-    #set goal to first point on path
-    #go to next goal
-    #linefollowing
-    #if obstacle is detected and not near box goal
-        # Obstacle Sequence:
-            # 1. Stop motors immediately.
-            # 2. Using encoder data that was counted from the last intersection return to said intersection .
-            # 3. Turn 90 degrees to the right (or left, depending on strategy) using encoder data.
-            # 4. Pathfind
-    #if line lost
-        #new goal calculated through odometry data, goes back to nearest line
-    #If at intersection
-        #new odometry counter activated from estimated 
-        #if near box goal 
-            #if touchsensor active:
-                #activate magnet
-                #sleep 0.3s
-                #Boxstoring sequence
-                #box counter incremented
-        #if box counter < 3
-            #next goal is next box
-        #else
-            #return original to starting coordinates
-            #if at original coordinates initiate unloading sequence
+def is_obstacle_detected():
+    return any(p.getValue() > OBSTACLE_THRESHOLD for p in ps)
 
+# === Runtime Variables ===
+previous_error = 0
+node_detected_cooldown = 0
+curr_index = 1
+prev_node = None
+
+# Odometry variables initialization
+x_robot, y_robot, phi_robot = 0.0, 0.0, 0.0 # Initial pose, will be reset at first intersection
+old_encoder_values = [0.0, 0.0] # Will be set at first intersection
+
+last_known_good_x, last_known_good_y, last_known_good_phi = 0.0, 0.0, 0.0
+last_known_good_encoders = [0.0, 0.0]
+odometry_active = False # Flag to indicate when odometry is actively tracking relative movement
+
+# === Main Control Loop ===
+grid = create_grid()
+costs = create_costs()
+start = (0, 0) # Your initial grid start point
+goals = [(12, 10), (12, 12), (12, 14), (12, 16)] # Example goals
+box_counter = 0
+path = []
+
+
+while robot.step(timestep) != -1: # This is your main simulation loop step
+    # --- Odometry Update (Only calculate if odometry_active is True) ---
+    if odometry_active and encoders[0] is not None and encoders[1] is not None:
+        current_encoder_values = read_encoders(encoders)
+        wl, wr = get_wheels_speed(current_encoder_values, old_encoder_values, delta_t)
+        u, w = get_robot_speeds(wl, wr, WHEEL_RADIUS, WHEEL_DISTANCE)
+        x_robot, y_robot, phi_robot = get_robot_pose(u, w, x_robot, y_robot, phi_robot, delta_t)
+        old_encoder_values = current_encoder_values
+    # --- End Odometry Update ---
+
+    if current_state == State.INIT:
+        current_goal = goals[box_counter]
+        path = dijkstra(grid, costs, start, current_goal)
+        print(f"Initial path to box {box_counter+1}: {path}")
+        prev_node = path[0]
+        curr_index = 1
+        current_state = State.LINE_FOLLOW
+
+    elif current_state == State.LINE_FOLLOW:
+        if is_obstacle_detected():
+            print("Obstacle detected!")
+            left_motor.setVelocity(0)
+            right_motor.setVelocity(0)
+            current_state = State.OBSTACLE_AVOIDANCE
+            continue
+
+        if node_detected_cooldown > 0:
+            node_detected_cooldown -= 1
+
+        if node_detected_cooldown == 0 and is_node_detected():
+            print("Node detected!")
+            node_detected_cooldown = NODE_DEBOUNCE_TIME
+            current_state = State.NODE_DETECTED
+        else:
+            line_follow()
+
+    elif current_state == State.NODE_DETECTED:
+        # Re-calibrate odometry to the known grid coordinates of the detected node
+        current_grid_node = path[curr_index - 1]
+        expected_node_x, expected_node_y = grid_to_odom(*current_grid_node)
+        
+        # Determine the expected orientation at this node, assuming it's facing the next path segment
+        expected_phi = phi_robot # Default to current robot phi, will be corrected if there's a next path segment
+        if curr_index < len(path): # If there's a next node in the path
+            next_grid_node = path[curr_index]
+            expected_phi = angle_between(current_grid_node, next_grid_node)
+        
+        # Set robot's pose to the known grid coordinates and orientation
+        x_robot, y_robot, phi_robot = expected_node_x, expected_node_y, expected_phi
+        
+        # Save this as the last known good pose for recovery
+        last_known_good_x, last_known_good_y, last_known_good_phi = x_robot, y_robot, phi_robot
+        
+        # Also re-initialize old_encoder_values to current readings for accurate odometry from this point
+        if encoders[0] is not None and encoders[1] is not None:
+            old_encoder_values = read_encoders(encoders)
+            last_known_good_encoders = list(old_encoder_values) # Store a copy
+
+        odometry_active = True # Odometry tracking is now active and reliable
+
+        # Check if the detected node corresponds to a named node
+        named_node = get_node_name_from_odom(x_robot, y_robot)
+        if named_node:
+            print(f"--> Robot is at NAMED NODE: {named_node} (Grid: {current_grid_node})")
+            # You can add specific logic here for each named node if needed
+
+        print(f"Odometry at Node: x={x_robot:.3f}, y={y_robot:.3f}, phi={math.degrees(phi_robot):.2f} degrees")
+
+
+        if curr_index < len(path):
+            curr_node_path = path[curr_index - 1]
+            next_node_path = path[curr_index]
+            direction = determine_turn(prev_node, curr_node_path, next_node_path)
+            print(f"Turning from {curr_node_path} to {next_node_path}: {direction}")
+            if direction == "turn_left":
+                execute_turn_left()
+            elif direction == "turn_right":
+                execute_turn_right()
+            prev_node = curr_node_path
+            curr_index += 1
+        else:
+            print("Reached final node in path.")
+            current_state = State.GOAL_REACHED
+        current_state = State.LINE_FOLLOW
+
+    elif current_state == State.OBSTACLE_AVOIDANCE:
+        print("[OBSTACLE_AVOIDANCE] Obstacle detected! Reverting to last known good pose.")
+        # Revert robot's internal pose to the last known good intersection
+        x_robot, y_robot, phi_robot = last_known_good_x, last_known_good_y, last_known_good_phi
+        if encoders[0] is not None and encoders[1] is not None:
+            old_encoder_values = list(last_known_good_encoders) # Reset encoders too
+        
+        # Stop motors to prevent further collision/movement
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
+        
+        # if not odometry reverse then rotate back:
+        # left_motor.setVelocity(BASE_SPEED * 0)
+        # right_motor.setVelocity(-BASE_SPEED / 2)
+        # robot.step(int(0.5 / delta_t)) # Move back for 0.5 seconds
+        # left_motor.setVelocity(0)
+        # right_motor.setVelocity(0)
+
+
+        # Transition back to line following to try and re-engage
+        current_state = State.LINE_FOLLOW
+
+    elif current_state == State.GOAL_REACHED:
+        print("Goal reached! Placeholder for pickup.")
+        current_state = State.IDLE
+
+    elif current_state == State.IDLE:
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
+        break
