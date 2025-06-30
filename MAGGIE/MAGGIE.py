@@ -413,26 +413,60 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
         current_state = State.LINE_FOLLOW
 
     elif current_state == State.OBSTACLE_AVOIDANCE:
-        print("[OBSTACLE_AVOIDANCE] Obstacle detected! Reverting to last known good pose.")
-        # Revert robot's internal pose to the last known good intersection
-        x_robot, y_robot, phi_robot = last_known_good_x, last_known_good_y, last_known_good_phi
+        print("[OBSTACLE_AVOIDANCE] Attempting to revert to last known good intersection...")
+
+        target_distance = 0.0
         if encoders[0] is not None and encoders[1] is not None:
-            old_encoder_values = list(last_known_good_encoders) # Reset encoders too
-        
-        # Stop motors to prevent further collision/movement
+            current_encoder_values = read_encoders(encoders)
+            dl = (current_encoder_values[0] - last_known_good_encoders[0]) * WHEEL_RADIUS
+            dr = (current_encoder_values[1] - last_known_good_encoders[1]) * WHEEL_RADIUS
+            target_distance = (dl + dr) / 2.0  # average linear distance to revert
+
+        print(f"Reversing distance: {target_distance:.3f} meters")
+
+        reverse_distance = 0.0
+        reverse_encoder_start = read_encoders(encoders)
+        while reverse_distance < abs(target_distance):
+            left_motor.setVelocity(-BASE_SPEED)
+            right_motor.setVelocity(-BASE_SPEED)
+            robot.step(timestep)
+
+            reverse_encoder_now = read_encoders(encoders)
+            dl = (reverse_encoder_now[0] - reverse_encoder_start[0]) * WHEEL_RADIUS
+            dr = (reverse_encoder_now[1] - reverse_encoder_start[1]) * WHEEL_RADIUS
+            reverse_distance = abs((dl + dr) / 2.0)
+
+        # Stop motors
         left_motor.setVelocity(0)
         right_motor.setVelocity(0)
-        
-        # if not odometry reverse then rotate back:
-        # left_motor.setVelocity(BASE_SPEED * 0)
-        # right_motor.setVelocity(-BASE_SPEED / 2)
-        # robot.step(int(0.5 / delta_t)) # Move back for 0.5 seconds
-        # left_motor.setVelocity(0)
-        # right_motor.setVelocity(0)
+        print("[OBSTACLE_AVOIDANCE] Returned to last intersection.")
+
+        start_node = path[curr_index - 1]
+        end_node = path[curr_index]
+
+        # Increase cost for every grid cell along the straight path
+        dx = end_node[0] - start_node[0]
+        dy = end_node[1] - start_node[1]
+
+        steps = max(abs(dx), abs(dy))
+        for i in range(1, steps + 1):
+            row = start_node[0] + (dx // steps) * i
+            col = start_node[1] + (dy // steps) * i
+            if 0 <= row < len(costs) and 0 <= col < len(costs[0]):
+                costs[row][col] += 100  # High cost, but not infinite
+                print(f"[COST UPDATE] Increased cost at ({row}, {col})")
 
 
-        # Transition back to line following to try and re-engage
+        # Recalculate path
+        start_node = path[curr_index - 1]
+        path = dijkstra(grid, costs, start_node, goals[box_counter])
+        print(f"[OBSTACLE_AVOIDANCE] New path calculated: {path}")
+        curr_index = 1
+        prev_node = path[0]
+
+        # Resume line following
         current_state = State.LINE_FOLLOW
+
 
     elif current_state == State.GOAL_REACHED:
         print("Goal reached! Placeholder for pickup.")
