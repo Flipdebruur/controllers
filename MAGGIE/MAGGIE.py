@@ -6,7 +6,6 @@
 from controller import Robot
 import math
 import heapq
-import time
 
 # === Constants ===
 CELL_WIDTH = 0.06245
@@ -172,7 +171,7 @@ def create_grid():
         [  0,  1,    0,  1,    0,  1,    0,  1,   1,   1,   1,   1,   1,   1,   1,   1,   1], # Row 1
         ['A',  0,  'B',  0,  'C',  0,  'D',  0, 'E',   0,   0,   0,   0,   0,   0,   0, 'F'], # Row 2
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 3
-        [  0,  1,    1,  1,    1,  1,    1,  1,   'G',   0,   0,   0,   0,   0,   0,   0, 'H'], # Row 4
+        [  0,  1,    1,  1,    1,  1,    1,  1, 'G',   0,   0,   0,   0,   0,   0,   0, 'H'], # Row 4
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 5
         ['I',  0,    0,  0,    0,  0,    0,  0, 'J',   0,   0,   0,   0,   0,   0,   0, 'K'], # Row 6
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 7
@@ -393,229 +392,200 @@ box_counter = 0 # Tracks which box we are currently going to pick up
 current_target_goal = None # This will hold the current grid goal (either a box or base)
 
 
+def plan_path():
+    """Plan a path to the next box or return to base."""
+    global current_target_goal, path, current_path_node_idx, current_state
+    if box_counter < len(goals_grid_coords_boxes):
+        current_target_goal = goals_grid_coords_boxes[box_counter]
+        print(f"Planning path to box {box_counter+1} at grid: {current_target_goal}")
+    else:
+        current_target_goal = return_to_base_grid_coords
+        print(f"Planning path to return to base at grid: {current_target_goal}")
+    path = dijkstra(grid, costs, start_grid_coords, current_target_goal)
+    if not path:
+        print(f"No path found from {start_grid_coords} to {current_target_goal}. Check grid and costs.")
+        current_state = State.IDLE
+        return False
+    print(f"Path calculated: {path}")
+    current_path_node_idx = 0
+    current_state = State.LINE_FOLLOW
+    return True
+
+def handle_line_follow():
+    global current_state, node_detected_cooldown
+    if is_obstacle_detected():
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
+        current_state = State.OBSTACLE_AVOIDANCE
+        return
+    if node_detected_cooldown > 0:
+        node_detected_cooldown -= 1
+    if node_detected_cooldown == 0 and is_node_detected():
+        node_detected_cooldown = NODE_DEBOUNCE_TIME
+        current_state = State.NODE_DETECTED
+    else:
+        line_follow()
+
+def handle_node_detected():
+    global current_state, current_path_node_idx, last_known_good_x, last_known_good_y, last_known_good_phi
+    global last_known_good_encoders, x_robot, y_robot, phi_robot, odometry_active, box_counter, start_grid_coords
+
+    left_motor.setVelocity(0)
+    right_motor.setVelocity(0)
+    robot.step(timestep)
+
+    current_grid_node_arrived_at = None
+    next_named_node_idx = None
+    for idx in range(current_path_node_idx + 1, len(path)):
+        node = path[idx]
+        if node in node_name_to_grid_coords.values():
+            next_named_node_idx = idx
+            break
+
+    if next_named_node_idx is not None:
+        current_path_node_idx = next_named_node_idx
+        current_grid_node_arrived_at = path[current_path_node_idx]
+        print(f"--> Node detected. Arrived at named node: {current_grid_node_arrived_at}.")
+    else:
+        print("Warning: No more named nodes in path or at end of path.")
+
+    if current_grid_node_arrived_at:
+        expected_node_x, expected_node_y = grid_to_odom(*current_grid_node_arrived_at)
+        expected_phi = phi_robot
+        if current_path_node_idx + 1 < len(path):
+            next_grid_node_for_phi = path[current_path_node_idx + 1]
+            expected_phi = angle_between(current_grid_node_arrived_at, next_grid_node_for_phi)
+        elif current_path_node_idx > 0:
+            prev_grid_node_for_phi = path[current_path_node_idx - 1]
+            expected_phi = angle_between(prev_grid_node_for_phi, current_grid_node_arrived_at)
+
+        x_robot, y_robot, phi_robot = expected_node_x, expected_node_y, expected_phi
+        last_known_good_x, last_known_good_y, last_known_good_phi = x_robot, y_robot, phi_robot
+        if encoders[0] is not None and encoders[1] is not None:
+            old_encoder_values = read_encoders(encoders)
+            last_known_good_encoders = list(old_encoder_values)
+        odometry_active = True
+
+        if current_grid_node_arrived_at == current_target_goal:
+            print(f"Reached final target node: {current_grid_node_arrived_at}.")
+            if current_target_goal in goals_grid_coords_boxes:
+                print(f"Picked up box {box_counter+1} at {current_grid_node_arrived_at}!")
+                box_counter += 1
+                if box_counter < len(goals_grid_coords_boxes):
+                    start_grid_coords = current_grid_node_arrived_at
+                    current_state = State.INIT
+                else:
+                    print("All boxes collected! Initiating return to base.")
+                    start_grid_coords = current_grid_node_arrived_at
+                    current_state = State.INIT
+            elif current_target_goal == return_to_base_grid_coords:
+                print("Returned to base (J node)! Initiating drop-off sequence.")
+                current_state = State.IDLE
+        else:
+            if current_grid_node_arrived_at and current_path_node_idx + 1 < len(path):
+                turn_prev = path[current_path_node_idx - 1] if current_path_node_idx > 0 else path[0]
+                turn_curr = current_grid_node_arrived_at
+                turn_next = path[current_path_node_idx + 1]
+                direction = determine_turn(turn_prev, turn_curr, turn_next)
+                if direction == "turn_left":
+                    execute_turn_left()
+                elif direction == "turn_right":
+                    execute_turn_right()
+                current_state = State.LINE_FOLLOW
+            else:
+                print("Error: Path ended unexpectedly before reaching target goal (in NODE_DETECTED else block).")
+                current_state = State.IDLE
+    else:
+        print("Intersection detected, but not at a named node. Continuing line following.")
+        current_state = State.LINE_FOLLOW
+
+def handle_obstacle_avoidance():
+    global current_state, current_path_node_idx, x_robot, y_robot, phi_robot, old_encoder_values
+    global last_known_good_x, last_known_good_y, last_known_good_phi, last_known_good_encoders, path, costs
+
+    print("[OBSTACLE_AVOIDANCE] Attempting to revert to last known good intersection...")
+    left_motor.setVelocity(0)
+    right_motor.setVelocity(0)
+    robot.step(timestep)
+
+    target_distance = 0.0
+    if encoders[0] is not None and encoders[1] is not None:
+        current_encoder_values = read_encoders(encoders)
+        dl = (current_encoder_values[0] - last_known_good_encoders[0]) * WHEEL_RADIUS
+        dr = (current_encoder_values[1] - last_known_good_encoders[1]) * WHEEL_RADIUS
+        target_distance = (dl + dr) / 2.0
+        print(f"Reversing distance: {target_distance:.3f} meters")
+        reverse_distance_traveled = 0.0
+        initial_reverse_encoders = read_encoders(encoders)
+        while reverse_distance_traveled < abs(target_distance) - 0.005:
+            left_motor.setVelocity(-BASE_SPEED)
+            right_motor.setVelocity(-BASE_SPEED)
+            robot.step(timestep)
+            current_reverse_encoders = read_encoders(encoders)
+            dl_rev = (current_reverse_encoders[0] - initial_reverse_encoders[0]) * WHEEL_RADIUS
+            dr_rev = (current_reverse_encoders[1] - initial_reverse_encoders[1]) * WHEEL_RADIUS
+            reverse_distance_traveled = abs((dl_rev + dr_rev) / 2.0)
+
+    left_motor.setVelocity(0)
+    right_motor.setVelocity(0)
+    print("[OBSTACLE_AVOIDANCE] Returned to last intersection area (approx).")
+    x_robot, y_robot, phi_robot = last_known_good_x, last_known_good_y, last_known_good_phi
+    if encoders[0] is not None and encoders[1] is not None:
+        old_encoder_values = list(last_known_good_encoders)
+
+    problem_segment_start_node = path[current_path_node_idx]
+    problem_segment_end_node = path[current_path_node_idx + 1]
+    print(f"Marking segment from {problem_segment_start_node} to {problem_segment_end_node} as high cost.")
+    dx = problem_segment_end_node[0] - problem_segment_start_node[0]
+    dy = problem_segment_end_node[1] - problem_segment_start_node[1]
+    steps = max(abs(dx), abs(dy))
+    if steps == 0:
+        steps = 1
+    for i in range(steps + 1):
+        row_to_mark = problem_segment_start_node[0] + (dx * i // steps)
+        col_to_mark = problem_segment_start_node[1] + (dy * i // steps)
+        if 0 <= row_to_mark < len(costs) and 0 <= col_to_mark < len(costs[0]):
+            costs[row_to_mark][col_to_mark] += 100000
+            print(f"[COST UPDATE] Increased cost at ({row_to_mark}, {col_to_mark})")
+    start_for_new_path = path[current_path_node_idx]
+    path = dijkstra(grid, costs, start_for_new_path, current_target_goal)
+    if not path:
+        print(f"No new path found from {start_for_new_path} to {current_target_goal}. Robot stuck.")
+        current_state = State.IDLE
+        return
+    print(f"[OBSTACLE_AVOIDANCE] New path calculated: {path}")
+    current_path_node_idx = 0
+    current_state = State.LINE_FOLLOW
+
+def handle_goal_reached():
+    print("Goal reached (internal logic, actual transitions happen in NODE_DETECTED).")
+    return State.IDLE
+
+def handle_idle():
+    left_motor.setVelocity(0)
+    right_motor.setVelocity(0)
+    return True
+
 # === Main Control Loop ===
-while robot.step(timestep) != -1: # This is your main simulation loop step
-    # --- Odometry Update (Only calculate if odometry_active is True) ---
+while robot.step(timestep) != -1:
     if odometry_active and encoders[0] is not None and encoders[1] is not None:
         current_encoder_values = read_encoders(encoders)
         wl, wr = get_wheels_speed(current_encoder_values, old_encoder_values, delta_t)
         u, w = get_robot_speeds(wl, wr, WHEEL_RADIUS, WHEEL_DISTANCE)
         x_robot, y_robot, phi_robot = get_robot_pose(u, w, x_robot, y_robot, phi_robot, delta_t)
         old_encoder_values = current_encoder_values
-    # --- End Odometry Update ---
 
     if current_state == State.INIT:
-        # Determine the next goal based on current mission phase
-        if box_counter < len(goals_grid_coords_boxes): # Still need to pick up boxes
-            current_target_goal = goals_grid_coords_boxes[box_counter]
-            print(f"Planning path to box {box_counter+1} at grid: {current_target_goal}")
-        else: # All boxes picked up, return to base
-            current_target_goal = return_to_base_grid_coords
-            print(f"Planning path to return to base at grid: {current_target_goal}")
-
-        path = dijkstra(grid, costs, start_grid_coords, current_target_goal)
-        
-        if not path:
-            print(f"No path found from {start_grid_coords} to {current_target_goal}. Check grid and costs.")
-            current_state = State.IDLE # Stop if no path
+        if not plan_path():
             continue
-
-        print(f"Path calculated: {path}")
-        current_path_node_idx = 0 # Robot starts at the very first node in the path.
-        current_state = State.LINE_FOLLOW
-
     elif current_state == State.LINE_FOLLOW:
-        if is_obstacle_detected():
-            #print("Obstacle detected!")
-            left_motor.setVelocity(0)
-            right_motor.setVelocity(0)
-            current_state = State.OBSTACLE_AVOIDANCE
-            continue
-
-        if node_detected_cooldown > 0:
-            node_detected_cooldown -= 1
-
-        # Node detection for intersections
-        if node_detected_cooldown == 0 and is_node_detected():
-            #print("Node detected!")
-            node_detected_cooldown = NODE_DEBOUNCE_TIME
-            current_state = State.NODE_DETECTED
-        else:
-            line_follow()
-
+        handle_line_follow()
     elif current_state == State.NODE_DETECTED:
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
-        robot.step(timestep) # Ensure motors stop for calibration
-
-        current_grid_node_arrived_at = None
-
-        # Only advance if the next node in the path is a named node
-        # Find the next named node in the path
-        next_named_node_idx = None
-        for idx in range(current_path_node_idx + 1, len(path)):
-            node = path[idx]
-            if node in node_name_to_grid_coords.values():
-                next_named_node_idx = idx
-                break
-
-        if next_named_node_idx is not None:
-            current_path_node_idx = next_named_node_idx
-            current_grid_node_arrived_at = path[current_path_node_idx]
-            print(f"--> Node detected. Arrived at named node: {current_grid_node_arrived_at}.")
-        else:
-            print("Warning: No more named nodes in path or at end of path.")
-
-        # Only recalibrate and check goal if at a named node
-        if current_grid_node_arrived_at:
-            expected_node_x, expected_node_y = grid_to_odom(*current_grid_node_arrived_at)
-            expected_phi = phi_robot
-            if current_path_node_idx + 1 < len(path):
-                next_grid_node_for_phi = path[current_path_node_idx + 1]
-                expected_phi = angle_between(current_grid_node_arrived_at, next_grid_node_for_phi)
-            elif current_path_node_idx > 0:
-                prev_grid_node_for_phi = path[current_path_node_idx - 1]
-                expected_phi = angle_between(prev_grid_node_for_phi, current_grid_node_arrived_at)
-
-            x_robot, y_robot, phi_robot = expected_node_x, expected_node_y, expected_phi
-            last_known_good_x, last_known_good_y, last_known_good_phi = x_robot, y_robot, phi_robot
-            if encoders[0] is not None and encoders[1] is not None:
-                old_encoder_values = read_encoders(encoders)
-                last_known_good_encoders = list(old_encoder_values)
-            odometry_active = True
-            #print(f"Odometry updated at Node: x={x_robot:.3f}, y={y_robot:.3f}, phi={math.degrees(phi_robot):.2f} degrees")
-
-            # Check if at goal
-            if current_grid_node_arrived_at == current_target_goal:
-                print(f"Reached final target node: {current_grid_node_arrived_at}.")
-                if current_target_goal in goals_grid_coords_boxes:
-                    print(f"Picked up box {box_counter+1} at {current_grid_node_arrived_at}!")
-                    box_counter += 1
-                    if box_counter < len(goals_grid_coords_boxes):
-                        start_grid_coords = current_grid_node_arrived_at
-                        current_state = State.INIT
-                    else:
-                        print("All boxes collected! Initiating return to base.")
-                        start_grid_coords = current_grid_node_arrived_at
-                        current_state = State.INIT
-                elif current_target_goal == return_to_base_grid_coords:
-                    print("Returned to base (J node)! Initiating drop-off sequence.")
-                    current_state = State.IDLE
-            else:
-                # Not the final goal, determine turn for the next segment and continue line following.
-                if current_grid_node_arrived_at and current_path_node_idx + 1 < len(path):
-                    turn_prev = path[current_path_node_idx - 1] if current_path_node_idx > 0 else path[0]
-                    turn_curr = current_grid_node_arrived_at
-                    turn_next = path[current_path_node_idx + 1]
-
-                    direction = determine_turn(turn_prev, turn_curr, turn_next)
-                    #print(f"Turn from {turn_prev} -> {turn_curr} -> {turn_next}: {direction}")
-                    if direction == "turn_left":
-                        execute_turn_left()
-                    elif direction == "turn_right":
-                        execute_turn_right()
-                    current_state = State.LINE_FOLLOW
-                else:
-                    print("Error: Path ended unexpectedly before reaching target goal (in NODE_DETECTED else block).")
-                    current_state = State.IDLE
-        else:
-            # If not at a named node, just keep following the line
-            print("Intersection detected, but not at a named node. Continuing line following.")
-            current_state = State.LINE_FOLLOW
-
+        handle_node_detected()
     elif current_state == State.OBSTACLE_AVOIDANCE:
-        print("[OBSTACLE_AVOIDANCE] Attempting to revert to last known good intersection...")
-
-        # Stop motors
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
-        robot.step(timestep) # Ensure motors stop
-
-        # Calculate distance to revert
-        target_distance = 0.0
-        if encoders[0] is not None and encoders[1] is not None:
-            current_encoder_values = read_encoders(encoders)
-            # Distance from last_known_good_encoders to current_encoder_values
-            dl = (current_encoder_values[0] - last_known_good_encoders[0]) * WHEEL_RADIUS
-            dr = (current_encoder_values[1] - last_known_good_encoders[1]) * WHEEL_RADIUS
-            target_distance = (dl + dr) / 2.0  # Average linear distance traveled since last known good
-            print(f"Reversing distance: {target_distance:.3f} meters")
-
-            reverse_distance_traveled = 0.0
-            initial_reverse_encoders = read_encoders(encoders)
-
-            # Reverse until distance is covered. Use a small threshold to avoid infinite loop.
-            while reverse_distance_traveled < abs(target_distance) - 0.005: # Subtract a small value for tolerance
-                left_motor.setVelocity(-BASE_SPEED)
-                right_motor.setVelocity(-BASE_SPEED)
-                robot.step(timestep)
-
-                current_reverse_encoders = read_encoders(encoders)
-                dl_rev = (current_reverse_encoders[0] - initial_reverse_encoders[0]) * WHEEL_RADIUS
-                dr_rev = (current_reverse_encoders[1] - initial_reverse_encoders[1]) * WHEEL_RADIUS
-                reverse_distance_traveled = abs((dl_rev + dr_rev) / 2.0)
-
-        # Stop motors after reversing
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
-        print("[OBSTACLE_AVOIDANCE] Returned to last intersection area (approx).")
-
-        # Recalibrate pose to the last known good intersection's pose
-        x_robot, y_robot, phi_robot = last_known_good_x, last_known_good_y, last_known_good_phi
-        # Re-initialize encoders to correspond to this known pose
-        if encoders[0] is not None and encoders[1] is not None:
-            old_encoder_values = list(last_known_good_encoders)
-
-        # Identify the segment that had the obstacle.
-        # The robot was traversing the segment from `path[current_path_node_idx]` (current node)
-        # to `path[current_path_node_idx + 1]` (next target, where obstacle was found).
-        problem_segment_start_node = path[current_path_node_idx]
-        problem_segment_end_node = path[current_path_node_idx + 1] # The next node in the path
-
-        print(f"Marking segment from {problem_segment_start_node} to {problem_segment_end_node} as high cost.")
-
-        # Increase cost for every grid cell along this segment
-        dx = problem_segment_end_node[0] - problem_segment_start_node[0]
-        dy = problem_segment_end_node[1] - problem_segment_start_node[1]
-
-        steps = max(abs(dx), abs(dy))
-        if steps == 0: # If start and end nodes are the same (shouldn't happen for a segment in a valid path)
-            steps = 1
-
-        for i in range(steps + 1): # Include start and end nodes
-            # Interpolate grid coordinates
-            row_to_mark = problem_segment_start_node[0] + (dx * i // steps)
-            col_to_mark = problem_segment_start_node[1] + (dy * i // steps)
-
-            if 0 <= row_to_mark < len(costs) and 0 <= col_to_mark < len(costs[0]):
-                # Make it very undesirable, potentially impassable for future paths
-                costs[row_to_mark][col_to_mark] += 100000 
-                print(f"[COST UPDATE] Increased cost at ({row_to_mark}, {col_to_mark})")
-
-        # Recalculate path from the node where the robot reverted to.
-        # The robot is now effectively at `problem_segment_start_node` (which is `path[current_path_node_idx]`).
-        start_for_new_path = path[current_path_node_idx]
-        path = dijkstra(grid, costs, start_for_new_path, current_target_goal)
-
-        if not path:
-            print(f"No new path found from {start_for_new_path} to {current_target_goal}. Robot stuck.")
-            current_state = State.IDLE # No path found, robot is stuck
-            continue
-
-        print(f"[OBSTACLE_AVOIDANCE] New path calculated: {path}")
-        current_path_node_idx = 0 # Reset index for the new path, as robot is at path[0] of this new path.
-
-        # Resume line following
-        current_state = State.LINE_FOLLOW
-
-
+        handle_obstacle_avoidance()
     elif current_state == State.GOAL_REACHED:
-        print("Goal reached (internal logic, actual transitions happen in NODE_DETECTED).")
-        # This state is more of a placeholder as actual goal-reaching logic
-        # is handled within NODE_DETECTED based on `current_path_node_idx` reaching the goal.
-        current_state = State.IDLE # For now, transition to IDLE after goal processing in NODE_DETECTED
-
+        current_state = handle_goal_reached()
     elif current_state == State.IDLE:
-        left_motor.setVelocity(0)
-        right_motor.setVelocity(0)
-        break # Exit the main loop if in IDLE state
+        if handle_idle():
+            break
