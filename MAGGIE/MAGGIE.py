@@ -25,7 +25,7 @@ BASE_SPEED = 1.2
 Kp = 0.06
 Kd = 0.005
 OBSTACLE_THRESHOLD = 100.0
-NODE_DEBOUNCE_TIME = 20
+NODE_DEBOUNCE_TIME = 25
 
 # Robot physical parameters for odometry
 WHEEL_RADIUS = 0.0205  # Approximate wheel radius in meters (you might need to adjust this)
@@ -172,7 +172,7 @@ def create_grid():
         [  0,  1,    0,  1,    0,  1,    0,  1,   1,   1,   1,   1,   1,   1,   1,   1,   1], # Row 1
         ['A',  0,  'B',  0,  'C',  0,  'D',  0, 'E',   0,   0,   0,   0,   0,   0,   0, 'F'], # Row 2
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 3
-        [  0,  1,    1,  1,    1,  1,    1,  1,   0,   0,   0,   0,   0,   0,   0,   0, 'H'], # Row 4
+        [  0,  1,    1,  1,    1,  1,    1,  1,   'G',   0,   0,   0,   0,   0,   0,   0, 'H'], # Row 4
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 5
         ['I',  0,    0,  0,    0,  0,    0,  0, 'J',   0,   0,   0,   0,   0,   0,   0, 'K'], # Row 6
         [  0,  1,    1,  1,    1,  1,    1,  1,   0,   1,   1,   1,   1,   1,   1,   1,   0], # Row 7
@@ -426,7 +426,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
 
     elif current_state == State.LINE_FOLLOW:
         if is_obstacle_detected():
-            print("Obstacle detected!")
+            #print("Obstacle detected!")
             left_motor.setVelocity(0)
             right_motor.setVelocity(0)
             current_state = State.OBSTACLE_AVOIDANCE
@@ -437,7 +437,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
 
         # Node detection for intersections
         if node_detected_cooldown == 0 and is_node_detected():
-            print("Node detected!")
+            #print("Node detected!")
             node_detected_cooldown = NODE_DEBOUNCE_TIME
             current_state = State.NODE_DETECTED
         else:
@@ -451,6 +451,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
         current_grid_node_arrived_at = None
 
         # Only advance if the next node in the path is a named node
+        # Find the next named node in the path
         next_named_node_idx = None
         for idx in range(current_path_node_idx + 1, len(path)):
             node = path[idx]
@@ -461,28 +462,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
         if next_named_node_idx is not None:
             current_path_node_idx = next_named_node_idx
             current_grid_node_arrived_at = path[current_path_node_idx]
-            # Find the name of the current intersection
-            current_node_name = None
-            for name, coords in node_name_to_grid_coords.items():
-                if coords == current_grid_node_arrived_at:
-                    current_node_name = name
-                    break
-            # Find the name of the next intersection (goal)
-            next_goal_name = None
-            if current_path_node_idx + 1 < len(path):
-                next_goal_coords = path[current_path_node_idx + 1]
-                for name, coords in node_name_to_grid_coords.items():
-                    if coords == next_goal_coords:
-                        next_goal_name = name
-                        break
-            else:
-                next_goal_name = None
-
-            print(f"--> Node detected. Arrived at named node: {current_node_name} ({current_grid_node_arrived_at}).")
-            if next_goal_name:
-                print(f"Next intersection goal: {next_goal_name} ({path[current_path_node_idx + 1]})")
-            else:
-                print("No further intersection goal in path.")
+            print(f"--> Node detected. Arrived at named node: {current_grid_node_arrived_at}.")
         else:
             print("Warning: No more named nodes in path or at end of path.")
 
@@ -503,7 +483,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
                 old_encoder_values = read_encoders(encoders)
                 last_known_good_encoders = list(old_encoder_values)
             odometry_active = True
-            print(f"Odometry updated at Node: x={x_robot:.3f}, y={y_robot:.3f}, phi={math.degrees(phi_robot):.2f} degrees")
+            #print(f"Odometry updated at Node: x={x_robot:.3f}, y={y_robot:.3f}, phi={math.degrees(phi_robot):.2f} degrees")
 
             # Check if at goal
             if current_grid_node_arrived_at == current_target_goal:
@@ -529,7 +509,7 @@ while robot.step(timestep) != -1: # This is your main simulation loop step
                     turn_next = path[current_path_node_idx + 1]
 
                     direction = determine_turn(turn_prev, turn_curr, turn_next)
-                    print(f"Turn from {turn_prev} -> {turn_curr} -> {turn_next}: {direction}")
+                    #print(f"Turn from {turn_prev} -> {turn_curr} -> {turn_next}: {direction}")
                     if direction == "turn_left":
                         execute_turn_left()
                     elif direction == "turn_right":
