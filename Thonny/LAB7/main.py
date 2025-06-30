@@ -41,6 +41,7 @@ else:
             [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0]
             ])
         return grid
+    
 
     def create_costs(): #costs example used from Lab examples its arbitrary
         """
