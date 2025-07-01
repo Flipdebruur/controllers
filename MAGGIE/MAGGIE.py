@@ -256,8 +256,6 @@ def grid_to_odom(row, col):
     y = ORIGIN_Y + row * CELL_HEIGHT
     return (x, y)
 
-# Removed: get_node_name_from_odom function as requested by the user.
-
 def angle_between(n1, n2):
     """
     Calculates the angle (in radians) between two grid nodes.
