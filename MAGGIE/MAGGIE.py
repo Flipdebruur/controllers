@@ -311,6 +311,15 @@ def execute_turn_right():
     right_motor.setVelocity(-1.5)
     robot.step(int(13 * timestep)) # This step duration might need tuning based on actual turn
 
+def execute_turn_around():
+    # Turn in place 180 degrees (adjust speed/duration as needed)
+    left_motor.setVelocity(BASE_SPEED)
+    right_motor.setVelocity(-BASE_SPEED)
+    # 180 degrees = pi radians; duration may need tuning for your robot
+    robot.step(int(110 * timestep))  # If 13*timestep is 90deg, 26*timestep is 180deg
+    left_motor.setVelocity(0)
+    right_motor.setVelocity(0)
+
 def is_node_detected():
     # Check if all ground sensors detect the line (indicating an intersection/node)
     # This logic assumes the robot is on a dark line over a light background, or vice-versa
@@ -529,6 +538,10 @@ def handle_obstacle_avoidance():
     left_motor.setVelocity(0)
     right_motor.setVelocity(0)
     print("[OBSTACLE_AVOIDANCE] Returned to last intersection area (approx).")
+
+    # 180-degree turn to face the correct direction for new path
+    execute_turn_around()
+
     x_robot, y_robot, phi_robot = last_known_good_x, last_known_good_y, last_known_good_phi
     if encoders[0] is not None and encoders[1] is not None:
         old_encoder_values = list(last_known_good_encoders)
@@ -557,35 +570,42 @@ def handle_obstacle_avoidance():
     current_path_node_idx = 0
     current_state = State.LINE_FOLLOW
 
-def handle_goal_reached():
-    print("Goal reached (internal logic, actual transitions happen in NODE_DETECTED).")
-    return State.IDLE
-
-def handle_idle():
-    left_motor.setVelocity(0)
-    right_motor.setVelocity(0)
-    return True
-
-# === Main Control Loop ===
+# === Main Loop ===
 while robot.step(timestep) != -1:
-    if odometry_active and encoders[0] is not None and encoders[1] is not None:
-        current_encoder_values = read_encoders(encoders)
-        wl, wr = get_wheels_speed(current_encoder_values, old_encoder_values, delta_t)
-        u, w = get_robot_speeds(wl, wr, WHEEL_RADIUS, WHEEL_DISTANCE)
-        x_robot, y_robot, phi_robot = get_robot_pose(u, w, x_robot, y_robot, phi_robot, delta_t)
-        old_encoder_values = current_encoder_values
+    # Update sensor readings, odometry, and other time-dependent tasks here
 
+    # Odometry update
+    if odometry_active:
+        if encoders[0] is not None and encoders[1] is not None:
+            encoder_values = read_encoders(encoders)
+            wl, wr = get_wheels_speed(encoder_values, old_encoder_values, delta_t)
+            u, w = get_robot_speeds(wl, wr, WHEEL_RADIUS, WHEEL_DISTANCE)
+            x_robot, y_robot, phi_robot = get_robot_pose(u, w, x_robot, y_robot, phi_robot, delta_t)
+            old_encoder_values = list(encoder_values) # Update old encoder values
+
+    # State machine
     if current_state == State.INIT:
-        if not plan_path():
-            continue
+        print("State: INIT")
+        plan_path()
     elif current_state == State.LINE_FOLLOW:
         handle_line_follow()
     elif current_state == State.NODE_DETECTED:
+        print("State: NODE_DETECTED")
         handle_node_detected()
     elif current_state == State.OBSTACLE_AVOIDANCE:
+        print("State: OBSTACLE_AVOIDANCE")
         handle_obstacle_avoidance()
     elif current_state == State.GOAL_REACHED:
-        current_state = handle_goal_reached()
+        print("State: GOAL_REACHED - This state is not explicitly handled, ensure it transitions to DROP_OFF or RETURN_TO_BASE.")
+    elif current_state == State.RETURN_TO_BASE:
+        print("State: RETURN_TO_BASE - This state is not explicitly handled, ensure it transitions to DROP_OFF or IDLE.")
+    elif current_state == State.DROP_OFF:
+        print("State: DROP_OFF - This state is not explicitly handled, ensure it transitions to IDLE or RETURN_TO_BASE.")
     elif current_state == State.IDLE:
-        if handle_idle():
-            break
+        print("State: IDLE - The robot is idle. Implement any idle behavior or waiting logic here.")
+    else:
+        print(f"Unknown state: {current_state}. Please check state machine logic.")
+
+    # Add any additional global or shared variable updates here
+
+# Cleanup and shutdown procedures if necessary
