@@ -1,5 +1,4 @@
-
-from controller import Robot
+from machine import Pin
 import math
 import heapq
 
@@ -22,7 +21,6 @@ NODE_DEBOUNCE_TIME = 25
 WHEEL_RADIUS = 0.0205  # Approximate wheel radius in meters (you might need to adjust this)
 WHEEL_DISTANCE = 0.052  # Distance between the centers of the two wheels in meters (you might need to adjust this)
 
-# Removed: node_positions dictionary as requested by the user.
 
 # === Setup Robot ===
 robot = Robot()
@@ -56,6 +54,138 @@ if left_encoder is not None:
 if right_encoder is not None:
     right_encoder.enable(timestep)
 encoders = [left_encoder, right_encoder]
+
+#Box and stepper setup
+from machine import Pin
+import time
+
+def setup_pins(Pin):
+    IN1 = Pin(14, Pin.OUT)
+    IN2 = Pin(27, Pin.OUT)
+    IN3 = Pin(26, Pin.OUT)
+    IN4 = Pin(25, Pin.OUT)
+    switch_pin = Pin(12, Pin.IN, Pin.PULL_DOWN)
+    magnet_pin = Pin(13, Pin.OUT)
+    magnet_pin.value(0)
+    release_switch_pin = Pin(33, Pin.IN, Pin.PULL_DOWN)
+    reverse_trigger_pin = Pin(32, Pin.IN, Pin.PULL_DOWN)
+    return IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin
+
+fullstep_seq = [
+    [1, 1, 0, 0],
+    [0, 1, 1, 0],
+    [0, 0, 1, 1],
+    [1, 0, 0, 1]
+]
+STEPS_PER_REV = 2048
+
+def step_motor(IN1, IN2, IN3, IN4, steps, delay_ms=2, direction=1):
+    pins = [IN1, IN2, IN3, IN4]
+    seq_len = len(fullstep_seq)
+    seq_index = 0
+
+    for _ in range(steps):
+        for pin, val in zip(pins, fullstep_seq[seq_index]):
+            pin.value(val)
+        seq_index = (seq_index + direction) % seq_len
+        time.sleep_ms(delay_ms)
+
+    for pin in pins:
+        pin.value(0)
+
+def rotate(IN1, IN2, IN3, IN4, rotations, delay_ms=2, direction=1):
+    total_steps = int(rotations * STEPS_PER_REV)
+    step_motor(IN1, IN2, IN3, IN4, total_steps, delay_ms, direction)
+
+def forward_process(IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count):
+    rotations = rotation_sequence[press_count % len(rotation_sequence)]
+    print("Rotations this cycle:", rotations)
+
+    if (press_count % len(rotation_sequence)) == 3:
+        print("4th press → magnet ON until released")
+        magnet_pin.value(1)
+        print("Magnet ON. Waiting for release signal...")
+        while release_switch_pin.value() == 0:
+            time.sleep_ms(50)
+        stable_count = 0
+        while stable_count < 5:
+            if release_switch_pin.value() == 1:
+                stable_count += 1
+            else:
+                stable_count = 0
+            time.sleep_ms(10)
+        magnet_pin.value(0)
+        print("Magnet OFF after release condition.")
+        return True  # Enter reverse mode
+    else:
+        magnet_pin.value(1)
+        print("Magnet ON.")
+        time.sleep(1)
+        rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=-1)
+        print("Forward rotation done.")
+        magnet_pin.value(0)
+        print("Magnet OFF.")
+        rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=1)
+        print("Backward rotation done.")
+        return False
+
+def reverse_process(IN1, IN2, IN3, IN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count):
+    if reverse_press_count < len(reverse_sequence):
+        rotations = reverse_sequence[reverse_press_count]
+        print("Reverse cycle", reverse_press_count + 1)
+        print("Rotations:", rotations)
+        rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=1)
+        print("Reverse backward done.")
+        magnet_pin.value(1)
+        print("Magnet ON in reverse cycle.")
+        time.sleep(1)
+        rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=-1)
+        print("Reverse forward done.")
+        magnet_pin.value(0)
+        print("Magnet OFF in reverse cycle.")
+        while reverse_trigger_pin.value() == 1:
+            time.sleep_ms(50)
+        return reverse_press_count + 1, False
+    else:
+        print("Reverse sequence complete.")
+        print("Resetting system for next forward cycle.")
+        return 0, True
+
+def Box_pickup(Pin):
+    IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins(Pin)
+    rotation_sequence = [4, 3, 2, 1]
+    reverse_sequence = [2, 3, 4]
+    press_count = 0
+    reverse_press_count = 0
+    reverse_mode = False
+
+    print("System ready.")
+
+    while True:
+        # Forward Mode
+        if switch_pin.value() == 1 and not reverse_mode:
+            print("Forward button pressed.")
+            reverse_mode = forward_process(
+                IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count
+            )
+            press_count += 1
+            while switch_pin.value() == 1:
+                time.sleep_ms(50)
+
+        # Reverse Mode
+        if reverse_mode:
+            reverse_trigger = reverse_trigger_pin.value() == 1
+            if reverse_trigger:
+                reverse_press_count, reset = reverse_process(
+                    IN1, IN2, IN3, IN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count
+                )
+                if reset:
+                    reverse_mode = False
+                    press_count = 0
+                    reverse_press_count = 0
+
+        time.sleep_ms(50)
+
 
 # === Odometry Functions ===
 def read_encoders(encoders):

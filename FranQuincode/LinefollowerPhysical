@@ -1,0 +1,166 @@
+from machine import Pin, PWM
+from time import ticks_ms, ticks_diff, sleep_ms
+
+# === IR Sensors ===
+pid_ir_pins = [2, 4, 39]            # left, center, right
+pid_weights = [-1, 0, 1]
+irs_pid = [Pin(pin, Pin.IN) for pin in pid_ir_pins]
+
+all_ir_pins = [15, 2, 4, 39, 36]    # far left, left, center, right, far right
+irs_all = [Pin(pin, Pin.IN) for pin in all_ir_pins]
+
+# === Motor PWM ===
+LEFT_FWD = PWM(Pin(33), freq=1000)
+LEFT_BWD = PWM(Pin(32), freq=1000)
+RIGHT_FWD = PWM(Pin(26), freq=1000)
+RIGHT_BWD = PWM(Pin(25), freq=1000)
+
+def set_motor(left, right):
+    def apply(fwd, bwd, speed):
+        duty = min(max(int(abs(speed) * 1023), 0), 1023)
+        if speed > 0:
+            fwd.duty(duty)
+            bwd.duty(0)
+        else:
+            fwd.duty(0)
+            bwd.duty(duty)
+    apply(LEFT_FWD, LEFT_BWD, left)
+    apply(RIGHT_FWD, RIGHT_BWD, right)
+
+def stop():
+    set_motor(0, 0)
+
+# === PID Constants ===
+Kp = 0.25
+Ki = 0.0
+Kd = 0.25
+
+last_error = 0
+integral = 0
+last_time = ticks_ms()
+
+# === Encoder Setup ===
+left_ticks = 0
+right_ticks = 0
+encoder_turn_ticks = 30  # calibrate for 90 deg turn
+
+# === States ===
+STATE_LINE_FOLLOW = "line_follow"
+STATE_CHECK_INTERSECTION = "check_intersection"
+STATE_TURNING = "turning"
+state = STATE_LINE_FOLLOW
+next_turn = None
+
+# === Intersection Timing ===
+node_cooldown = 2000
+last_node_time = ticks_ms() - node_cooldown
+
+# === Turning ===
+turn_speed = 0.7
+
+# === Encoder IRQs ===
+def on_left_tick(pin):
+    global left_ticks
+    left_ticks += 1
+
+def on_right_tick(pin):
+    global right_ticks
+    right_ticks += 1
+
+Pin(12, Pin.IN).irq(trigger=Pin.IRQ_RISING, handler=on_left_tick)
+Pin(27, Pin.IN).irq(trigger=Pin.IRQ_RISING, handler=on_right_tick)
+
+# === PID Line Following ===
+def pid_line_follow():
+    global last_error, integral, last_time
+    sensor_values = [s.value() for s in irs_pid]
+    active = sum(sensor_values)
+
+    if active == 0:
+        set_motor(0.2, 0.2)
+        return
+
+    error = sum(w * v for w, v in zip(pid_weights, sensor_values)) / active
+    now = ticks_ms()
+    dt = max(ticks_diff(now, last_time), 1) / 1000
+    P = error
+    I = integral + error * dt
+    D = (error - last_error) / dt
+
+    correction = Kp * P + Ki * I + Kd * D
+    integral = I
+    last_error = error
+    last_time = now
+
+    base_speed = 0.6
+    adjust = correction * 0.2
+    left_speed = max(min(base_speed - adjust, 1.0), 0.1)
+    right_speed = max(min(base_speed + adjust, 1.0), 0.1)
+
+    set_motor(left_speed, right_speed)
+
+# === Intersection Detection ===
+def detect_intersection():
+    readings = [s.value() for s in irs_all]
+    far_left = readings[0]
+    far_right = readings[4]
+    return far_left or far_right
+
+# === Determine Turn Direction ===
+def determine_turn_direction():
+    readings = [s.value() for s in irs_all]
+    far_left = readings[0]
+    far_right = readings[4]
+
+    if far_left and not far_right:
+        return "left"
+    elif far_right and not far_left:
+        return "right"
+    elif far_left and far_right:
+        return "left"
+    return "none"
+
+# === Encoder-based Turning ===
+def turn_90(direction):
+    global left_ticks, right_ticks
+    left_ticks = 0
+    right_ticks = 0
+
+    if direction == "left":
+        set_motor(-turn_speed, turn_speed)
+        while abs(left_ticks) < encoder_turn_ticks:
+            sleep_ms(1)
+    elif direction == "right":
+        set_motor(turn_speed, -turn_speed)
+        while abs(right_ticks) < encoder_turn_ticks:
+            sleep_ms(1)
+
+    stop()
+    sleep_ms(100)
+
+# === Main Loop ===
+try:
+    while True:
+        if state == STATE_LINE_FOLLOW:
+            pid_line_follow()
+            if detect_intersection():
+                now = ticks_ms()
+                if ticks_diff(now, last_node_time) > node_cooldown:
+                    state = STATE_CHECK_INTERSECTION
+                    last_node_time = now
+
+        elif state == STATE_CHECK_INTERSECTION:
+            next_turn = determine_turn_direction()
+            if next_turn != "none":
+                state = STATE_TURNING
+            else:
+                state = STATE_LINE_FOLLOW
+
+        elif state == STATE_TURNING:
+            turn_90(next_turn)
+            state = STATE_LINE_FOLLOW
+
+        sleep_ms(10)
+
+except KeyboardInterrupt:
+    stop()

@@ -127,4 +127,3 @@ def Box_pickup(Pin):
                     reverse_press_count = 0
 
         time.sleep_ms(50)
-Box_pickup(Pin)
