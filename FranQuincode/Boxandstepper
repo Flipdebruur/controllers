@@ -1,0 +1,69 @@
+import time
+
+def setup_pins(Pin):
+    IN1 = Pin(14, Pin.OUT)
+    IN2 = Pin(27, Pin.OUT)
+    IN3 = Pin(26, Pin.OUT)
+    IN4 = Pin(25, Pin.OUT)
+    switch_pin = Pin(12, Pin.IN, Pin.PULL_DOWN)
+    magnet_pin = Pin(13, Pin.OUT)
+    magnet_pin.value(0)
+    release_switch_pin = Pin(2, Pin.IN, Pin.PULL_DOWN)
+    return IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin
+
+fullstep_seq = [
+    [1, 1, 0, 0],
+    [0, 1, 1, 0],
+    [0, 0, 1, 1],
+    [1, 0, 0, 1]
+]
+STEPS_PER_REV = 2048
+
+def step_motor(IN1, IN2, IN3, IN4, steps, delay_ms=2, direction=1):
+    pins = [IN1, IN2, IN3, IN4]
+    seq_len = len(fullstep_seq)
+    seq_index = 0
+
+    for _ in range(steps):
+        for pin, val in zip(pins, fullstep_seq[seq_index]):
+            pin.value(val)
+        seq_index = (seq_index + direction) % seq_len
+        time.sleep_ms(delay_ms)
+
+    for pin in pins:
+        pin.value(0)
+
+def rotate(IN1, IN2, IN3, IN4, rotations, delay_ms=2, direction=1):
+    total_steps = int(rotations * STEPS_PER_REV)
+    step_motor(IN1, IN2, IN3, IN4, total_steps, delay_ms, direction)
+
+def Box_pickup(Pin):
+    IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin = setup_pins(Pin)
+    rotation_sequence = [4, 3, 2, 1]
+    press_count = 0
+
+    while True:
+        if switch_pin.value() == 1:
+            rotations = rotation_sequence[press_count % len(rotation_sequence)]
+
+            if (press_count % len(rotation_sequence)) == 3:
+                magnet_pin.value(1)
+                magnet_release = False
+                while not magnet_release:
+                    if release_switch_pin.value() == 1:
+                        magnet_release = True
+                    time.sleep_ms(50)
+                magnet_pin.value(0)
+            else:
+                magnet_pin.value(1)
+                time.sleep(1)
+                rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=-1)
+                magnet_pin.value(0)
+                rotate(IN1, IN2, IN3, IN4, rotations=rotations, delay_ms=5, direction=1)
+
+            press_count += 1
+            while switch_pin.value() == 1:
+                time.sleep_ms(50)
+        time.sleep_ms(50)
+
+Box_pickup(Pin)
