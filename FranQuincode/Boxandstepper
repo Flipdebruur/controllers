@@ -93,7 +93,7 @@ def reverse_process(IN1, IN2, IN3, IN4, magnet_pin, reverse_trigger_pin, reverse
         print("Resetting system for next forward cycle.")
         return 0, True
 
-def main_loop(Pin):
+def Box_pickup(Pin):
     IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins(Pin)
     rotation_sequence = [4, 3, 2, 1]
     reverse_sequence = [2, 3, 4]
@@ -127,8 +127,4 @@ def main_loop(Pin):
                     reverse_press_count = 0
 
         time.sleep_ms(50)
-
-# Only run if executed directly
-if __name__ == "__main__":
-    from machine import Pin
-    main_loop(Pin)
+Box_pickup(Pin)
