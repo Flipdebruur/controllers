@@ -1,0 +1,62 @@
+from machine import Pin, PWM, ADC
+import time
+
+# === IR Sensors (Analog) ===
+LINE_THRESHOLD = 600  # Adjust for your sensors/surface!
+
+# Use all 5 sensors: far left, left, center, right, far right
+all_ir_pins = [15, 2, 4, 39, 36]    # [far left, left, center, right, far right]
+pid_weights = [-2, -1, 0, 1, 2]     # More weight for outer sensors
+irs_pid = [ADC(Pin(pin)) for pin in all_ir_pins]
+for adc in irs_pid:
+    adc.atten(ADC.ATTN_11DB)
+
+# === Motor PWM ===
+LEFT_FWD = PWM(Pin(33), freq=1000)
+LEFT_BWD = PWM(Pin(32), freq=1000)
+RIGHT_FWD = PWM(Pin(26), freq=1000)
+RIGHT_BWD = PWM(Pin(25), freq=1000)
+
+
+def set_motor(left, right):
+    print(f"[MOTOR CMD] set_motor called: left={left:.2f}, right={right:.2f}")
+    def apply(fwd, bwd, speed, label):
+        duty = min(max(int(abs(speed) * 1023), 0), 1023)
+        print(f"[MOTOR CMD] {label} fwd.duty({duty if speed > 0 else 0}), bwd.duty({duty if speed < 0 else 0})")
+        if speed > 0:
+            fwd.duty(duty)
+            bwd.duty(0)
+        else:
+            fwd.duty(0)
+            bwd.duty(duty)
+    apply(RIGHT_FWD, RIGHT_BWD, left, "LEFT")
+    apply(LEFT_FWD, LEFT_BWD, right, "RIGHT")
+
+def stop():
+    set_motor(0, 0)
+
+def line_follow():
+    sensor_values = [1 if s.read() < LINE_THRESHOLD else 0 for s in irs_pid]
+    print(f"[LINE FOLLOW] IR sensor values: {sensor_values}")
+    active = sum(sensor_values)
+    if active == 0:
+        print("[LINE FOLLOW] No line detected, moving slowly forward")
+        set_motor(0.2, 0.2)
+        return
+    error = sum(w * v for w, v in zip(pid_weights, sensor_values)) / active
+    base_speed = 0.6
+    adjust = error * 0.2
+    left_speed = max(min(base_speed - adjust, 1.0), 0.1)
+    right_speed = max(min(base_speed + adjust, 1.0), 0.1)
+    print(f"[LINE FOLLOW] Calculated speeds: left={left_speed:.2f}, right={right_speed:.2f}, error={error:.2f}")
+    set_motor(left_speed, right_speed)
+
+def main():
+    try:
+        while True:
+            line_follow()
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        stop()
+        print("Stopped by user.")
+main()
