@@ -1,14 +1,15 @@
-from machine import Pin, PWM
+from machine import Pin, PWM, ADC
 import time
 import heapq
 
-# === IR Sensors ===
-pid_ir_pins = [2, 4, 39]            # left, center, right
-pid_weights = [-1, 0, 1]
-irs_pid = [Pin(pin, Pin.IN) for pin in pid_ir_pins]
+# === IR Sensors (Analog) ===
+LINE_THRESHOLD = 1200  # Adjust for your sensors/surface!
 
-all_ir_pins = [15, 2, 4, 39, 36]    # far left, left, center, right, far right
-irs_all = [Pin(pin, Pin.IN) for pin in all_ir_pins]
+# Use only 3 sensors: left, center, right
+all_ir_pins = [15, 4, 36]    # [left, center, right]
+irs_pid = [ADC(Pin(pin)) for pin in all_ir_pins]
+for adc in irs_pid:
+    adc.atten(ADC.ATTN_11DB)
 
 # === Motor PWM ===
 LEFT_FWD = PWM(Pin(33), freq=1000)
@@ -17,21 +18,24 @@ RIGHT_FWD = PWM(Pin(26), freq=1000)
 RIGHT_BWD = PWM(Pin(25), freq=1000)
 
 def set_motor(left, right):
-    def apply(fwd, bwd, speed):
+    print(f"[MOTOR CMD] set_motor called: left={left:.2f}, right={right:.2f}")
+    def apply(fwd, bwd, speed, label):
         duty = min(max(int(abs(speed) * 1023), 0), 1023)
+        print(f"[MOTOR CMD] {label} fwd.duty({duty if speed > 0 else 0}), bwd.duty({duty if speed < 0 else 0})")
         if speed > 0:
             fwd.duty(duty)
             bwd.duty(0)
         else:
             fwd.duty(0)
             bwd.duty(duty)
-    apply(LEFT_FWD, LEFT_BWD, left)
-    apply(RIGHT_FWD, RIGHT_BWD, right)
+    apply(LEFT_FWD, LEFT_BWD, left, "LEFT")
+    apply(RIGHT_FWD, RIGHT_BWD, right, "RIGHT")
 
 def stop():
     set_motor(0, 0)
 
 def turn_90(direction, turn_time=0.5, speed=0.5):
+    print(f"[TURN] turn_90 called: direction={direction}, turn_time={turn_time}, speed={speed}")
     """
     Turn the robot 90 degrees using timed motor control.
     direction: 'left' or 'right'
@@ -43,6 +47,7 @@ def turn_90(direction, turn_time=0.5, speed=0.5):
     elif direction == 'right':
         set_motor(speed, -speed)
     else:
+        print("[TURN] Invalid direction, not turning.")
         return
     time.sleep(turn_time)
     stop()
@@ -101,11 +106,11 @@ def step_motor(IN1, IN2, IN3, IN4, steps, delay_ms=2, direction=1):
     seq_index = 0
     for _ in range(steps):
         for pin, val in zip(pins, fullstep_seq[seq_index]):
-            pin.value(val)
+            pin.read(val)
         seq_index = (seq_index + direction) % seq_len
         time.sleep_ms(delay_ms)
     for pin in pins:
-        pin.value(0)
+        pin.read(0)
 
 def rotate(IN1, IN2, IN3, IN4, rotations, delay_ms=2, direction=1):
     total_steps = int(rotations * STEPS_PER_REV)
@@ -244,34 +249,51 @@ last_node_time = ticks_ms() - node_cooldown
 
 def detect_node():
     global last_node_time
-    readings = [s.value() for s in irs_all]
-    far_left = readings[0]
-    far_right = readings[4]
+    readings = [1 if s.read() < LINE_THRESHOLD else 0 for s in irs_pid]
+    left = readings[0]
+    right = readings[2]
     now = ticks_ms()
-    if (far_left or far_right) and ticks_diff(now, last_node_time) > node_cooldown:
+    # Node detected if both left and right sensors see black (e.g., a crossing)
+    if (left and right) and ticks_diff(now, last_node_time) > node_cooldown:
         last_node_time = now
         return True
     return False
 
 # === Line Following ===
 def line_follow():
-    sensor_values = [s.value() for s in irs_pid]
-    active = sum(sensor_values)
-    if active == 0:
-        set_motor(0.2, 0.2)
-        return
-    error = sum(w * v for w, v in zip(pid_weights, sensor_values)) / active
+    # Read 3 sensors: [left, center, right]
+    readings = [s.read() for s in irs_pid]
+    print(f"[LINE FOLLOW] Raw sensor readings: {readings}")
+
+    # Detect line (black) as value < LINE_THRESHOLD
+    left = 1 if readings[0] < LINE_THRESHOLD else 0
+    center = 1 if readings[1] < LINE_THRESHOLD else 0
+    right = 1 if readings[2] < LINE_THRESHOLD else 0
+
+    # Default speeds
     base_speed = 0.6
-    adjust = error * 0.2
-    left_speed = max(min(base_speed - adjust, 1.0), 0.1)
-    right_speed = max(min(base_speed + adjust, 1.0), 0.1)
+    turn_speed = 0.3
+
+    if center:
+        # On the line, go straight
+        left_speed = base_speed
+        right_speed = base_speed
+    elif left:
+        # Line is to the left, turn left
+        left_speed = turn_speed
+        right_speed = base_speed
+    elif right:
+        # Line is to the right, turn right
+        left_speed = base_speed
+        right_speed = turn_speed
+    else:
+        # No line detected, move slowly forward
+        left_speed = 0.2
+        right_speed = 0.2
+
+    print(f"[LINE FOLLOW] Calculated speeds: left={left_speed:.2f}, right={right_speed:.2f}")
     set_motor(left_speed, right_speed)
 
-def handle_obstacle_avoidance():
-    print("[SIM] Obstacle avoidance... (replace with your logic)")
-
-def handle_drop_off():
-    print("[SIM] Drop off... (replace with your logic)")
 
 def handle_box_pickup(box_vars):
     IN1, IN2, IN3, IN4, magnet_pin, release_switch_pin = box_vars
@@ -287,13 +309,19 @@ def handle_box_pickup(box_vars):
 planned_path = []
 current_path_idx = 0
 current_dir = 'E'  # Assume starting facing East (adjust as needed)
+box_nodes = ['T', 'U', 'V', 'W']  # List of box locations
+current_box_idx = 0  # Track which box is next
 
 def plan_path():
     grid = create_grid()
     costs = create_costs()
-    global node_name_to_grid_coords, planned_path, current_path_idx, current_dir
-    start = node_name_to_grid_coords['A']
-    goal = node_name_to_grid_coords['B']
+    global node_name_to_grid_coords, planned_path, current_path_idx, current_dir, current_box_idx
+    # Start at 'X' for the first box, otherwise from the previous box
+    if current_box_idx == 0:
+        start = node_name_to_grid_coords['X']
+    else:
+        start = node_name_to_grid_coords[box_nodes[current_box_idx - 1]]
+    goal = node_name_to_grid_coords[box_nodes[current_box_idx]]
     path = dijkstra(grid, costs, start, goal)
     if not path:
         print("No path found!")
@@ -305,7 +333,7 @@ def plan_path():
     return True
 
 def main():
-    global current_state, current_path_idx, current_dir, planned_path
+    global current_state, current_path_idx, current_dir, planned_path, current_box_idx
     IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins(Pin)
     box_vars = (IN1, IN2, IN3, IN4, magnet_pin, release_switch_pin)
     while True:
@@ -313,10 +341,12 @@ def main():
             print("State: INIT")
             if plan_path():
                 current_state = State.LINE_FOLLOW
+
         elif current_state == State.LINE_FOLLOW:
             line_follow()
             if detect_node():
                 current_state = State.NODE_DETECTED
+
         elif current_state == State.NODE_DETECTED:
             print("State: NODE_DETECTED")
             if current_path_idx < len(planned_path) - 1:
@@ -334,29 +364,28 @@ def main():
                 # Update direction and path index
                 current_dir = next_dir
                 current_path_idx += 1
-            current_state = State.LINE_FOLLOW
-        elif current_state == State.OBSTACLE_AVOIDANCE:
-            handle_obstacle_avoidance()
-            current_state = State.LINE_FOLLOW
+            else:
+                # Arrived at box node
+                current_state = State.BOX_PICKUP
+
         elif current_state == State.BOX_PICKUP:
             print("State: BOX_PICKUP")
             if handle_box_pickup(box_vars):
-                current_state = State.RETURN_TO_BASE
-        elif current_state == State.RETURN_TO_BASE:
-            print("State: RETURN_TO_BASE")
-            current_state = State.DROP_OFF
-        elif current_state == State.DROP_OFF:
-            handle_drop_off()
-            current_state = State.IDLE
+                current_box_idx += 1
+                if current_box_idx < len(box_nodes):
+                    current_state = State.INIT  # Go to next box
+                else:
+                    current_state = State.IDLE  # All boxes done
+
         elif current_state == State.IDLE:
             print("State: IDLE - Robot is idle.")
             stop()
             break
+
         else:
             print(f"Unknown state: {current_state}")
             stop()
             break
-        time.sleep(0.1)
 
-if __name__ == "__main__":
-    main()
+        time.sleep(0.1)
+main()
