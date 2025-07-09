@@ -1,11 +1,6 @@
 from machine import ADC, Pin
 import time
 
-# Use ADC pins (note: pins 2 and 4 are digital input only on ESP32, so use ADC-capable pins only)
-# Since GPIO2 and GPIO4 are not ADC pins on ESP32, they cannot be used for analog reading.
-# Instead, if you want to use 5 analog sensors, use GPIO25 and GPIO26 for example.
-
-# So corrected pins:
 sensor_pins = [34, 33, 15, 2, 4]  # Left, Left Mid, Middle, Right Mid, Right
 sensors = [ADC(Pin(pin)) for pin in sensor_pins]
 
