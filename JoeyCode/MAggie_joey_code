@@ -200,10 +200,6 @@ while True:
         time.sleep(0.3)
         current_state = 'forward'
     elif current_state == 'Goal reached':
-        forward(700)
-
-
-
-
+        Stop()
 
     time.sleep(0.05)

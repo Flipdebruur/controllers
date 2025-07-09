@@ -11,14 +11,14 @@ IN4 = Pin(12, Pin.OUT)  # Right motor backward
 EN_A = PWM(Pin(25), freq=1000)  # Left motor speed
 EN_B = PWM(Pin(32), freq=1000)  # Right motor speed
 
-switch_pin = Pin(17, Pin.IN, Pin.PULL_DOWN)
+switch_pin = Pin(16, Pin.IN, Pin.PULL_DOWN)
 
 def setup_pins_stepper(Pin):
     sIN1 = Pin(5, Pin.OUT)
     sIN2 = Pin(18, Pin.OUT)
     sIN3 = Pin(19, Pin.OUT)
     sIN4 = Pin(21, Pin.OUT)
-    switch_pin = Pin(17, Pin.IN, Pin.PULL_DOWN)
+    switch_pin = Pin(16, Pin.IN, Pin.PULL_DOWN)
     magnet_pin = Pin(13, Pin.OUT)
     magnet_pin.value(0)
     release_switch_pin = False
@@ -309,9 +309,6 @@ while True:
             robot_heading = new_heading
         else:
             current_state = 'Goal reached'
-            print("Goal reached or no next node.")
-            while True:
-                time.sleep(1)
 
     # === Act ===
     if current_state == 'forward':
@@ -342,11 +339,16 @@ while True:
         time.sleep(0.3)
         current_state = 'forward'
     elif current_state == 'Goal reached':
-        forward(700)
-        if switch_pin.value() == 1:
-            Box_pickup(Pin)
-            turnaround(800)
-            time.sleep(3)
-            path_planning(graph, start_node, goal_node)
-            current_state = 'forward'
+        while switch_pin.value() == 1:
+            forward(100)
+            time.sleep(0.05)
+        Stop()
+        Box_pickup(switch_pin)
+        turnaround(800)
+        time.sleep(3)
+        path = path_planning(graph, start_node, goal_node)
+        path_index = 0
+        robot_heading = 0
+        current_state = 'forward'
+
     time.sleep(0.05)
