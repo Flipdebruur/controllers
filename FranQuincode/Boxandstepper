@@ -94,7 +94,7 @@ def reverse_process(sIN1, sIN2, sIN3, sIN4, magnet_pin, reverse_trigger_pin, rev
         return 0, True
 
 def Box_pickup(Pin):
-    IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins_stepper(Pin)
+    sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins_stepper(Pin)
     rotation_sequence = [4, 3, 2, 1]
     reverse_sequence = [2, 3, 4]
     press_count = 0
@@ -108,7 +108,7 @@ def Box_pickup(Pin):
         if switch_pin.value() == 1 and not reverse_mode:
             print("Forward button pressed.")
             reverse_mode = forward_process(
-                IN1, IN2, IN3, IN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count
+                sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count
             )
             press_count += 1
             while switch_pin.value() == 1:
@@ -119,7 +119,7 @@ def Box_pickup(Pin):
             reverse_trigger = reverse_trigger_pin.value() == 1
             if reverse_trigger:
                 reverse_press_count, reset = reverse_process(
-                    IN1, IN2, IN3, IN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count
+                    sIN1, sIN2, sIN3, sIN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count
                 )
                 if reset:
                     reverse_mode = False

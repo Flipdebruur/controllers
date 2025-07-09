@@ -1,88 +1,82 @@
-#== OG THE WORKING LINE-FOLLOWING CODE == 
-
 from machine import Pin, PWM
 import time
 from WaveShaker import *
 
-# Motor setup
-freq = 1000
-left_motor = PWM(Pin(26), freq=freq)
-left_motor_back = PWM(Pin(27), freq=freq)
-right_motor = PWM(Pin(12), freq=freq)
-right_motor_back = PWM(Pin(14), freq=freq)
+# === L298N Motor Driver Setup ===
+IN1 = Pin(26, Pin.OUT)  # Left motor forward
+IN2 = Pin(27, Pin.OUT)  # Left motor backward
+IN3 = Pin(14, Pin.OUT)  # Right motor forward
+IN4 = Pin(12, Pin.OUT)  # Right motor backward
 
-# --- Movement logic ---
-robot_heading = 0  # 0: North, 1: East, 2: South, 3: West
+EN_A = PWM(Pin(25), freq=1000)  # Left motor speed
+EN_B = PWM(Pin(32), freq=1000)  # Right motor speed
 
 def set_speed(pwm, duty):
     pwm.duty(duty)
 
-def forward(vel=500): 
-    set_speed(left_motor, vel)
-    set_speed(left_motor_back, 0)
-    set_speed(right_motor, vel)
-    set_speed(right_motor_back, 0)
+def forward(vel=600):
+    IN1.on()
+    IN2.off()
+    IN3.on()
+    IN4.off()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
 
-def left(vel=500):
-    set_speed(left_motor, 0)
-    set_speed(left_motor_back, vel)
-    set_speed(right_motor, vel)
-    set_speed(right_motor_back, 0)
+def left(vel=600):
+    IN1.off()
+    IN2.on()
+    IN3.on()
+    IN4.off()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
 
-def right(vel=500):
-    set_speed(left_motor, vel)
-    set_speed(left_motor_back, 0)
-    set_speed(right_motor, 0)
-    set_speed(right_motor_back, vel)
+def right(vel=600):
+    IN1.on()
+    IN2.off()
+    IN3.off()
+    IN4.on()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
 
 def Stop():
-    set_speed(left_motor, 0)
-    set_speed(left_motor_back, 0)
-    set_speed(right_motor, 0)
-    set_speed(right_motor_back, 0)
+    IN1.off()
+    IN2.off()
+    IN3.off()
+    IN4.off()
+    set_speed(EN_A, 0)
+    set_speed(EN_B, 0)
 
+# === Dijkstra Graph ===
 graph = {
-    # Top row
     'A': [('E', 1, 2)], 
     'B': [('F', 1, 2)],
     'C': [('G', 1, 2)],
     'D': [('H', 1, 2)],
-    
-    # Entry lines
     'E': [('A', 1, 0), ('F', 1, 1), ('M', 5, 2)],
     'F': [('B', 1, 0), ('G', 1, 1), ('E', 1, 3)],
     'G': [('C', 1, 0), ('H', 1, 1), ('F', 1, 3)],
     'H': [('D', 1, 0), ('I', 2, 1), ('G', 1, 3)],
-    
-    #Right quarter
     'I': [('J', 5, 1), ('K', 3, 2), ('H', 2, 3)],
     'J': [('L', 3, 2), ('I', 5, 3)],
     'K': [('I', 3, 0), ('L', 5, 1), ('N', 2, 2)],
     'L': [('J', 3, 0), ('O', 2, 2), ('K', 5, 3)],
-
-    # Middle
     'M': [('E', 5, 0), ('N', 5, 1), ('P', 2, 2)],
     'N': [('K', 2, 0), ('O', 5, 1), ('Q', 2, 2), ('M', 5, 3)],
     'O': [('L', 2, 0), ('W', 5, 2), ('N', 5, 3)],
     'P': [('M', 2, 0), ('Q', 5, 1), ('R', 3, 2)],
     'Q': [('N', 2, 0), ('S', 3, 2), ('P', 5, 3)],
-    
-    #Left quarter
     'R': [('P', 3, 0), ('S', 5, 1)],
     'S': [('Q', 3, 0), ('T', 2, 1), ('R', 5, 3)],
-
-    # Entry lines
     'T': [('U', 1, 1), ('X', 1, 2), ('S', 2, 3)],
     'U': [('V', 1, 1), ('Y', 1, 2), ('T', 1, 3)],
     'V': [('W', 1, 1), ('Z', 1, 2), ('U', 1, 3)],
     'W': [('O', 5, 0), ('ZZ', 1, 2), ('V', 1, 3)],
-    
-    #Bottom row
     'X': [('T', 1, 0)],
     'Y': [('U', 1, 0)],
     'Z': [('V', 1, 0)],
     'ZZ': [('W', 1, 0)],
 }
+
 def dijkstra(graph, start, goal):
     shortest_distance = {node: float('inf') for node in graph}
     shortest_distance[start] = 0
@@ -113,34 +107,25 @@ def get_turn(current_node, next_node, robot_heading):
         if neighbor == next_node:
             rel_turn = (node_to_node_direction - robot_heading) % 4
             return rel_turn , node_to_node_direction
-        
-#--- Path preparation ---
-goal_node = 'E'  # Example goal node
-start_node = 'T'  # Example start node
 
+# === Path Planning ===
+goal_node = 'L'
+start_node = 'P'
+robot_heading = 0
 states = ['forward', 'forward_bit', 'swing_right', 'swing_left', 'turn_right', 'turn_left', 'stop']
 current_state = 'forward'
 
 path = dijkstra(graph, start_node, goal_node)
-
 path_index = 0
-current_node = path[path_index]
-next_node = path[path_index + 1]
+
 print("[PATH FOUND]", path)
-
 Stop()
-# Main loop for line following
+
+# === Main Loop ===
 while True:
-
-    ##################   See   ###################
-
-    WaveShaker = read_sensors()  # returns 5 sensor values now
+    WaveShaker = read_sensors()
     Far_left, left_mid, center, right_mid, Far_right = WaveShaker
-    message = (Far_left, left_mid, center, right_mid, Far_right)  # For debugging
-
-    ################## Think ###################
-
-    THRESHOLD = 1800 
+    THRESHOLD = 1800
 
     left_black = Far_left < THRESHOLD
     left_mid_black = left_mid < THRESHOLD
@@ -148,8 +133,8 @@ while True:
     right_mid_black = right_mid < THRESHOLD
     right_black = Far_right < THRESHOLD
 
-    #swinging left or right based on sensor readings
-    print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)  # Debug print
+    print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)
+
     if center_black or (right_mid_black and not right_black) or (left_mid_black and not left_black):
         current_state = 'forward'
     elif not center_black and (left_mid_black or left_black):
@@ -159,69 +144,66 @@ while True:
     else:
         Stop()
 
-    # Sleep to allow sensor reading update
     time.sleep(0.05)
 
     if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
-
-    # Only trigger once per node
         print("Node is detected")
-            
-        #if just_replanned:
-         #   just_replanned = False
-        #else:
-         #   
-            
-        #Changing variables to new current node and next node
-        if path[path_index] == goal_node:
-            print("Goal reached!")
+
+        if path_index + 1 < len(path):
+            current_node = path[path_index]
+            next_node = path[path_index + 1]
+            rel_turn, new_heading = get_turn(current_node, next_node, robot_heading)
+            path_index += 1
+
+            print(f"[Move] From: {current_node}, To: {next_node}, Heading: {rel_turn}")
+            if rel_turn == 0:
+                current_state = 'forward_bit'
+            elif rel_turn == 1:
+                current_state = 'turn_right'
+            elif rel_turn == 2:
+                current_state = 'turn_back'
+            elif rel_turn == 3:
+                current_state = 'turn_left'
+            robot_heading = new_heading
+        else:
+            print("Goal reached or no next node.")
             Stop()
             while True:
                 time.sleep(1)
-        
-        current_node = path[path_index]
-        next_node = path[path_index + 1]
-        rel_turn, new_heading = get_turn(current_node, next_node, robot_heading)
-        path_index += 1
-        
-        print(f"[Move] From: {current_node}, To: {next_node}, Heading: {rel_turn}")
-        if rel_turn == 0:
-            current_state = 'forward_bit'
-        elif rel_turn == 1:
-            current_state = 'turn_right'
-        elif rel_turn == 2:
-            current_state = 'turn_back'
-        elif rel_turn == 3:
-            current_state = 'turn_left'
-        robot_heading = new_heading
-            
-################## Act ###################
+
+    # === Act ===
     if current_state == 'forward':
         forward(700)
     elif current_state == 'swing_left':
         print("Swinging left")
-        left(500)
+        left(700)
     elif current_state == 'swing_right':
         print("Swinging right")
-        right(500)
+        right(700)
     elif current_state == 'turn_left':
-        left(600)
+        left(800)
         print("Going left")
         time.sleep(1.5)
-        forward(500)
+        forward(700)
         time.sleep(0.5)
         current_state = 'forward'
     elif current_state == 'turn_right':
         print("Going right")
-        right(600)
+        right(800)
         time.sleep(1.5)
-        forward(500)
+        forward(700)
         time.sleep(0.5)
         current_state = 'forward'
     elif current_state == 'forward_bit':
-        forward(500)
+        forward(600)
         print("Going bit_forward")
         time.sleep(0.3)
         current_state = 'forward'
-        
+    elif current_state == 'Goal reached':
+        forward(700)
+
+
+
+
+
     time.sleep(0.05)

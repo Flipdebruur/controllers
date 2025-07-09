@@ -2,96 +2,218 @@ from machine import Pin, PWM
 import time
 from WaveShaker import *
 
-# Speed control using PWM
-ENA = PWM(Pin(25), freq=1000)  # Motor A speed
-ENB = PWM(Pin(33), freq=1000)  # Motor B speed
+# === L298N Motor Driver Setup ===
+IN1 = Pin(26, Pin.OUT)  # Left motor forward
+IN2 = Pin(27, Pin.OUT)  # Left motor backward
+IN3 = Pin(14, Pin.OUT)  # Right motor forward
+IN4 = Pin(12, Pin.OUT)  # Right motor backward
 
-# LED's
-LED1 = Pin(22, Pin.OUT)  # LED for Motor A
+EN_A = PWM(Pin(25), freq=1000)  # Left motor speed
+EN_B = PWM(Pin(32), freq=1000)  # Right motor speed
 
-# Direction control
-IN1 = Pin(26, Pin.OUT)
-IN2 = Pin(27, Pin.OUT)
-IN3 = Pin(14, Pin.OUT)
-IN4 = Pin(12, Pin.OUT)
+switch_pin = Pin(17, Pin.IN, Pin.PULL_DOWN)
 
-vel = 100
+def setup_pins_stepper(Pin):
+    sIN1 = Pin(5, Pin.OUT)
+    sIN2 = Pin(18, Pin.OUT)
+    sIN3 = Pin(19, Pin.OUT)
+    sIN4 = Pin(21, Pin.OUT)
+    switch_pin = Pin(17, Pin.IN, Pin.PULL_DOWN)
+    magnet_pin = Pin(13, Pin.OUT)
+    magnet_pin.value(0)
+    release_switch_pin = False
+    reverse_trigger_pin = False
+    return sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin
 
-def set_motor(speed, en, in1, in2):
-    en.duty(speed)
-    if speed > 0:
-        in1.value(1)
-        in2.value(0)
+fullstep_seq = [
+    [1, 1, 0, 0],
+    [0, 1, 1, 0],
+    [0, 0, 1, 1],
+    [1, 0, 0, 1]
+]
+STEPS_PER_REV = 2048
+
+def step_motor(sIN1, sIN2, sIN3, sIN4, steps, delay_ms=2, direction=1):
+    pins = [sIN1, sIN2, sIN3, sIN4]
+    seq_len = len(fullstep_seq)
+    seq_index = 0
+
+    for _ in range(steps):
+        for pin, val in zip(pins, fullstep_seq[seq_index]):
+            pin.value(val)
+        seq_index = (seq_index + direction) % seq_len
+        time.sleep_ms(delay_ms)
+
+    for pin in pins:
+        pin.value(0)
+
+def rotate(sIN1, sIN2, sIN3, sIN4, rotations, delay_ms=2, direction=1):
+    total_steps = int(rotations * STEPS_PER_REV)
+    step_motor(sIN1, sIN2, sIN3, sIN4, total_steps, delay_ms, direction)
+
+def forward_process(sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count):
+    rotations = rotation_sequence[press_count % len(rotation_sequence)]
+    print("Rotations this cycle:", rotations)
+
+    if (press_count % len(rotation_sequence)) == 3:
+        print("4th press → magnet ON until released")
+        magnet_pin.value(1)
+        print("Magnet ON. Waiting for release signal...")
+        while release_switch_pin.value() == False:
+            time.sleep_ms(50)
+        stable_count = 0
+        while stable_count < 5:
+            if release_switch_pin.value() == True:
+                stable_count += 1
+            else:
+                stable_count = 0
+            time.sleep_ms(10)
+        magnet_pin.value(0)
+        print("Magnet OFF after release condition.")
+        return True  # Enter reverse mode
     else:
-        in1.value(0)
-        in2.value(1)
+        magnet_pin.value(1)
+        print("Magnet ON.")
+        time.sleep(1)
+        rotate(sIN1, sIN2, sIN3, sIN4, rotations=rotations, delay_ms=5, direction=-1)
+        print("Forward rotation done.")
+        magnet_pin.value(0)
+        print("Magnet OFF.")
+        rotate(sIN1, sIN2, sIN3, sIN4, rotations=rotations, delay_ms=5, direction=1)
+        print("Backward rotation done.")
+        return False
 
-def forward(vel):
-    set_motor(vel, ENA, IN1, IN2)
-    set_motor(vel, ENB, IN3, IN4)
+def reverse_process(sIN1, sIN2, sIN3, sIN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count):
+    if reverse_press_count < len(reverse_sequence):
+        rotations = reverse_sequence[reverse_press_count]
+        print("Reverse cycle", reverse_press_count + 1)
+        print("Rotations:", rotations)
+        rotate(sIN1, sIN2, sIN3, sIN4, rotations=rotations, delay_ms=5, direction=1)
+        print("Reverse backward done.")
+        magnet_pin.value(1)
+        print("Magnet ON in reverse cycle.")
+        time.sleep(1)
+        rotate(sIN1, sIN2, sIN3, sIN4, rotations=rotations, delay_ms=5, direction=-1)
+        print("Reverse forward done.")
+        magnet_pin.value(0)
+        print("Magnet OFF in reverse cycle.")
+        while reverse_trigger_pin.value() == True:
+            time.sleep_ms(50)
+        return reverse_press_count + 1, False
+    else:
+        print("Reverse sequence complete.")
+        print("Resetting system for next forward cycle.")
+        return 0, True
 
-def reverse(vel):
-    set_motor(-vel, ENA, IN1, IN2)
-    set_motor(-vel, ENB, IN3, IN4)
+def Box_pickup(Pin):
+    sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, reverse_trigger_pin = setup_pins_stepper(Pin)
+    rotation_sequence = [4, 3, 2, 1]
+    reverse_sequence = [2, 3, 4]
+    press_count = 0
+    reverse_press_count = 0
+    reverse_mode = False
 
-def left(vel):
-    set_motor(-vel, ENA, IN1, IN2)
-    set_motor(vel, ENB, IN3, IN4)
+    print("System ready.")
 
-def right(vel):
-    set_motor(vel, ENA, IN1, IN2)
-    set_motor(-vel, ENB, IN3, IN4)
+    while True:
+        # Forward Mode
+        if switch_pin.value() == 1 and not reverse_mode:
+            print("Forward button pressed.")
+            reverse_mode = forward_process(
+                sIN1, sIN2, sIN3, sIN4, switch_pin, magnet_pin, release_switch_pin, rotation_sequence, press_count
+            )
+            press_count += 1
+            while switch_pin.value() == 1:
+                time.sleep_ms(50)
+
+        # Reverse Mode
+        if reverse_mode:
+            reverse_trigger = reverse_trigger_pin.value() == True
+            if reverse_trigger:
+                reverse_press_count, reset = reverse_process(
+                    sIN1, sIN2, sIN3, sIN4, magnet_pin, reverse_trigger_pin, reverse_sequence, reverse_press_count
+                )
+                if reset:
+                    reverse_mode = False
+                    press_count = 0
+                    reverse_press_count = 0
+
+        time.sleep_ms(50)
+
+
+def set_speed(pwm, duty):
+    pwm.duty(duty)
+
+def forward(vel=600):
+    IN1.on()
+    IN2.off()
+    IN3.on()
+    IN4.off()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
+
+def left(vel=600):
+    IN1.off()
+    IN2.on()
+    IN3.on()
+    IN4.off()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
+
+def right(vel=600):
+    IN1.on()
+    IN2.off()
+    IN3.off()
+    IN4.on()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
 
 def Stop():
-    ENA.duty(0)
-    ENB.duty(0)
-    IN1.value(0)
-    IN2.value(0)
-    IN3.value(0)
-    IN4.value(0)
+    IN1.off()
+    IN2.off()
+    IN3.off()
+    IN4.off()
+    set_speed(EN_A, 0)
+    set_speed(EN_B, 0)
+def turnaround(vel=800):
+    IN1.on()
+    IN2.off()
+    IN3.off()
+    IN4.on()
+    set_speed(EN_A, vel)
+    set_speed(EN_B, vel)
 
+# === Dijkstra Graph ===
 graph = {
-    # Top row
     'A': [('E', 1, 2)], 
     'B': [('F', 1, 2)],
     'C': [('G', 1, 2)],
     'D': [('H', 1, 2)],
-    
-    # Entry lines
     'E': [('A', 1, 0), ('F', 1, 1), ('M', 5, 2)],
     'F': [('B', 1, 0), ('G', 1, 1), ('E', 1, 3)],
     'G': [('C', 1, 0), ('H', 1, 1), ('F', 1, 3)],
     'H': [('D', 1, 0), ('I', 2, 1), ('G', 1, 3)],
-    
-    #Right quarter
     'I': [('J', 5, 1), ('K', 3, 2), ('H', 2, 3)],
     'J': [('L', 3, 2), ('I', 5, 3)],
     'K': [('I', 3, 0), ('L', 5, 1), ('N', 2, 2)],
     'L': [('J', 3, 0), ('O', 2, 2), ('K', 5, 3)],
-
-    # Middle
     'M': [('E', 5, 0), ('N', 5, 1), ('P', 2, 2)],
     'N': [('K', 2, 0), ('O', 5, 1), ('Q', 2, 2), ('M', 5, 3)],
     'O': [('L', 2, 0), ('W', 5, 2), ('N', 5, 3)],
     'P': [('M', 2, 0), ('Q', 5, 1), ('R', 3, 2)],
     'Q': [('N', 2, 0), ('S', 3, 2), ('P', 5, 3)],
-    
-    #Left quarter
     'R': [('P', 3, 0), ('S', 5, 1)],
     'S': [('Q', 3, 0), ('T', 2, 1), ('R', 5, 3)],
-
-    # Entry lines
     'T': [('U', 1, 1), ('X', 1, 2), ('S', 2, 3)],
     'U': [('V', 1, 1), ('Y', 1, 2), ('T', 1, 3)],
     'V': [('W', 1, 1), ('Z', 1, 2), ('U', 1, 3)],
     'W': [('O', 5, 0), ('ZZ', 1, 2), ('V', 1, 3)],
-    
-    #Bottom row
     'X': [('T', 1, 0)],
     'Y': [('U', 1, 0)],
     'Z': [('V', 1, 0)],
     'ZZ': [('W', 1, 0)],
 }
+
 def dijkstra(graph, start, goal):
     shortest_distance = {node: float('inf') for node in graph}
     shortest_distance[start] = 0
@@ -122,84 +244,59 @@ def get_turn(current_node, next_node, robot_heading):
         if neighbor == next_node:
             rel_turn = (node_to_node_direction - robot_heading) % 4
             return rel_turn , node_to_node_direction
-
-
-        
-#--- Path preparation ---
-goal_node = 'E'  # Example goal node
-start_node = 'T'  # Example start node
-
-states = ['forward', 'forward_bit', 'swing_right', 'swing_left', 'turn_right', 'turn_left', 'stop']
+def path_planning(graph, start_node, goal_node):
+    path = dijkstra(graph, start_node, goal_node)
+    if not path:
+        print("No path found.")
+        return []
+    return path
+# === Path Planning ===
+goal_node = 'E'
+start_node = 'W'
+robot_heading = 0
+states = ['forward', 'forward_bit', 'swing_right', 'swing_left', 'turn_right', 'turn_left', 'stop', 'Goal reached']
 current_state = 'forward'
 
-
-
 path = dijkstra(graph, start_node, goal_node)
-
 path_index = 0
-current_node = path[path_index]
-next_node = path[path_index + 1]
+
 print("[PATH FOUND]", path)
-
 Stop()
-# Main loop for line following
-straightahead = True
-if straightahead == False:
-    while True:
 
-        ##################   See   ###################
+# === Main Loop ===
+while True:
+    WaveShaker = read_sensors()
+    Far_left, left_mid, center, right_mid, Far_right = WaveShaker
+    THRESHOLD = 1800
 
-        WaveShaker = read_sensors()  # returns 5 sensor values now
-        Far_left, left_mid, center, right_mid, Far_right = WaveShaker
-        message = (Far_left, left_mid, center, right_mid, Far_right)  # For debugging
+    left_black = Far_left < THRESHOLD
+    left_mid_black = left_mid < THRESHOLD
+    center_black = center < THRESHOLD
+    right_mid_black = right_mid < THRESHOLD
+    right_black = Far_right < THRESHOLD
 
-        ################## Think ###################
+    print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)
 
-        THRESHOLD = 2500 
+    if center_black or (right_mid_black and not right_black) or (left_mid_black and not left_black):
+        current_state = 'forward'
+    elif not center_black and (left_mid_black or left_black):
+        current_state = 'swing_left'
+    elif not center_black and (right_mid_black or right_black):
+        current_state = 'swing_right'
+    else:
+        Stop()
 
-        left_black = Far_left < THRESHOLD
-        left_mid_black = left_mid < THRESHOLD
-        center_black = center < THRESHOLD
-        right_mid_black = right_mid < THRESHOLD
-        right_black = Far_right < THRESHOLD
+    time.sleep(0.05)
 
-        #swinging left or right based on sensor readings
-        print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)  # Debug print
-        if center_black or (right_mid_black and not right_black) or (left_mid_black and not left_black):
-            current_state = 'forward'
-        elif not center_black and (left_mid_black or left_black):
-            current_state = 'swing_left'
-        elif not center_black and (right_mid_black or right_black):
-            current_state = 'swing_right'
-        else:
-            Stop()
+    if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
+        print("Node is detected")
 
-        # Sleep to allow sensor reading update
-        time.sleep(0.05)
-
-            
-        if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
-
-        # Only trigger once per node
-            print("Node is detected")
-                
-            #if just_replanned:
-            #   just_replanned = False
-            #else:
-            #   
-                
-            #Changing variables to new current node and next node
-            if path[path_index] == goal_node:
-                print("Goal reached!")
-                Stop()
-                while True:
-                    time.sleep(1)
-            
+        if path_index + 1 < len(path):
             current_node = path[path_index]
             next_node = path[path_index + 1]
             rel_turn, new_heading = get_turn(current_node, next_node, robot_heading)
             path_index += 1
-            
+
             print(f"[Move] From: {current_node}, To: {next_node}, Heading: {rel_turn}")
             if rel_turn == 0:
                 current_state = 'forward_bit'
@@ -210,39 +307,46 @@ if straightahead == False:
             elif rel_turn == 3:
                 current_state = 'turn_left'
             robot_heading = new_heading
-                
-    ################## Act ###################
-        if current_state == 'forward':
-            forward(200)
-            LED1.value(1)  # Turn on LED for Motor A
-            LED1.value(0)  # Turn off LED for Motor A
-        elif current_state == 'swing_left':
-            print("Swinging left")
-            left(100)
-        elif current_state == 'swing_right':
-            print("Swinging right")
-            right(100)
-        elif current_state == 'turn_left':
-            left(150)
-            print("Going left")
-            time.sleep(1.5)
-            forward(200)
-            time.sleep(0.5)
+        else:
+            current_state = 'Goal reached'
+            print("Goal reached or no next node.")
+            while True:
+                time.sleep(1)
+
+    # === Act ===
+    if current_state == 'forward':
+        forward(700)
+    elif current_state == 'swing_left':
+        print("Swinging left")
+        left(700)
+    elif current_state == 'swing_right':
+        print("Swinging right")
+        right(700)
+    elif current_state == 'turn_left':
+        left(800)
+        print("Going left")
+        time.sleep(1.5)
+        forward(700)
+        time.sleep(0.5)
+        current_state = 'forward'
+    elif current_state == 'turn_right':
+        print("Going right")
+        right(800)
+        time.sleep(1.5)
+        forward(700)
+        time.sleep(0.5)
+        current_state = 'forward'
+    elif current_state == 'forward_bit':
+        forward(600)
+        print("Going bit_forward")
+        time.sleep(0.3)
+        current_state = 'forward'
+    elif current_state == 'Goal reached':
+        forward(700)
+        if switch_pin.value() == 1:
+            Box_pickup(Pin)
+            turnaround(800)
+            time.sleep(3)
+            path_planning(graph, start_node, goal_node)
             current_state = 'forward'
-        elif current_state == 'turn_right':
-            print("Going right")
-            right(100)
-            time.sleep(1.5)
-            forward(200)
-            time.sleep(0.5)
-            current_state = 'forward'
-        elif current_state == 'forward_bit':
-            forward(200)
-            print("Going bit_forward")
-            time.sleep(0.3)
-            current_state = 'forward'
-            
-        time.sleep(0.05)
-else:
-    forward(200)
-    LED1.value(1)  # Turn on LED for Motor A
+    time.sleep(0.05)
