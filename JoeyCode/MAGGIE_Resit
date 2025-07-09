@@ -6,11 +6,16 @@ from WaveShaker import *
 ENA = PWM(Pin(25), freq=1000)  # Motor A speed
 ENB = PWM(Pin(33), freq=1000)  # Motor B speed
 
+# LED's
+LED1 = Pin(22, Pin.OUT)  # LED for Motor A
+
 # Direction control
 IN1 = Pin(26, Pin.OUT)
 IN2 = Pin(27, Pin.OUT)
 IN3 = Pin(14, Pin.OUT)
 IN4 = Pin(12, Pin.OUT)
+
+vel = 100
 
 def set_motor(speed, en, in1, in2):
     en.duty(speed)
@@ -21,19 +26,19 @@ def set_motor(speed, en, in1, in2):
         in1.value(0)
         in2.value(1)
 
-def forward(vel=700):
+def forward(vel):
     set_motor(vel, ENA, IN1, IN2)
     set_motor(vel, ENB, IN3, IN4)
 
-def reverse(vel=700):
+def reverse(vel):
     set_motor(-vel, ENA, IN1, IN2)
     set_motor(-vel, ENB, IN3, IN4)
 
-def left(vel=700):
+def left(vel):
     set_motor(-vel, ENA, IN1, IN2)
     set_motor(vel, ENB, IN3, IN4)
 
-def right(vel=700):
+def right(vel):
     set_motor(vel, ENA, IN1, IN2)
     set_motor(-vel, ENB, IN3, IN4)
 
@@ -117,6 +122,8 @@ def get_turn(current_node, next_node, robot_heading):
         if neighbor == next_node:
             rel_turn = (node_to_node_direction - robot_heading) % 4
             return rel_turn , node_to_node_direction
+
+
         
 #--- Path preparation ---
 goal_node = 'E'  # Example goal node
@@ -136,99 +143,106 @@ print("[PATH FOUND]", path)
 
 Stop()
 # Main loop for line following
-while True:
+straightahead = True
+if straightahead == False:
+    while True:
 
-    ##################   See   ###################
+        ##################   See   ###################
 
-    WaveShaker = read_sensors()  # returns 5 sensor values now
-    Far_left, left_mid, center, right_mid, Far_right = WaveShaker
-    message = (Far_left, left_mid, center, right_mid, Far_right)  # For debugging
+        WaveShaker = read_sensors()  # returns 5 sensor values now
+        Far_left, left_mid, center, right_mid, Far_right = WaveShaker
+        message = (Far_left, left_mid, center, right_mid, Far_right)  # For debugging
 
-    ################## Think ###################
+        ################## Think ###################
 
-    THRESHOLD = 2500 
+        THRESHOLD = 2500 
 
-    left_black = Far_left < THRESHOLD
-    left_mid_black = left_mid < THRESHOLD
-    center_black = center < THRESHOLD
-    right_mid_black = right_mid < THRESHOLD
-    right_black = Far_right < THRESHOLD
+        left_black = Far_left < THRESHOLD
+        left_mid_black = left_mid < THRESHOLD
+        center_black = center < THRESHOLD
+        right_mid_black = right_mid < THRESHOLD
+        right_black = Far_right < THRESHOLD
 
-    #swinging left or right based on sensor readings
-    print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)  # Debug print
-    if center_black or (right_mid_black and not right_black) or (left_mid_black and not left_black):
-        current_state = 'forward'
-    elif not center_black and (left_mid_black or left_black):
-        current_state = 'swing_left'
-    elif not center_black and (right_mid_black or right_black):
-        current_state = 'swing_right'
-    else:
-        Stop()
-
-    # Sleep to allow sensor reading update
-    time.sleep(0.05)
-
-        
-    if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
-
-    # Only trigger once per node
-        print("Node is detected")
-            
-        #if just_replanned:
-         #   just_replanned = False
-        #else:
-         #   
-            
-        #Changing variables to new current node and next node
-        if path[path_index] == goal_node:
-            print("Goal reached!")
+        #swinging left or right based on sensor readings
+        print("Sensors:", Far_left, left_mid, center, right_mid, Far_right)  # Debug print
+        if center_black or (right_mid_black and not right_black) or (left_mid_black and not left_black):
+            current_state = 'forward'
+        elif not center_black and (left_mid_black or left_black):
+            current_state = 'swing_left'
+        elif not center_black and (right_mid_black or right_black):
+            current_state = 'swing_right'
+        else:
             Stop()
-            while True:
-                time.sleep(1)
-        
-        current_node = path[path_index]
-        next_node = path[path_index + 1]
-        rel_turn, new_heading = get_turn(current_node, next_node, robot_heading)
-        path_index += 1
-        
-        print(f"[Move] From: {current_node}, To: {next_node}, Heading: {rel_turn}")
-        if rel_turn == 0:
-            current_state = 'forward_bit'
-        elif rel_turn == 1:
-            current_state = 'turn_right'
-        elif rel_turn == 2:
-            current_state = 'turn_back'
-        elif rel_turn == 3:
-            current_state = 'turn_left'
-        robot_heading = new_heading
+
+        # Sleep to allow sensor reading update
+        time.sleep(0.05)
+
             
-################## Act ###################
-    if current_state == 'forward':
-        forward(700)
-    elif current_state == 'swing_left':
-        print("Swinging left")
-        left(500)
-    elif current_state == 'swing_right':
-        print("Swinging right")
-        right(500)
-    elif current_state == 'turn_left':
-        left(600)
-        print("Going left")
-        time.sleep(1.5)
-        forward(500)
-        time.sleep(0.5)
-        current_state = 'forward'
-    elif current_state == 'turn_right':
-        print("Going right")
-        right(600)
-        time.sleep(1.5)
-        forward(500)
-        time.sleep(0.5)
-        current_state = 'forward'
-    elif current_state == 'forward_bit':
-        forward(500)
-        print("Going bit_forward")
-        time.sleep(0.3)
-        current_state = 'forward'
-        
-    time.sleep(0.05)
+        if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
+
+        # Only trigger once per node
+            print("Node is detected")
+                
+            #if just_replanned:
+            #   just_replanned = False
+            #else:
+            #   
+                
+            #Changing variables to new current node and next node
+            if path[path_index] == goal_node:
+                print("Goal reached!")
+                Stop()
+                while True:
+                    time.sleep(1)
+            
+            current_node = path[path_index]
+            next_node = path[path_index + 1]
+            rel_turn, new_heading = get_turn(current_node, next_node, robot_heading)
+            path_index += 1
+            
+            print(f"[Move] From: {current_node}, To: {next_node}, Heading: {rel_turn}")
+            if rel_turn == 0:
+                current_state = 'forward_bit'
+            elif rel_turn == 1:
+                current_state = 'turn_right'
+            elif rel_turn == 2:
+                current_state = 'turn_back'
+            elif rel_turn == 3:
+                current_state = 'turn_left'
+            robot_heading = new_heading
+                
+    ################## Act ###################
+        if current_state == 'forward':
+            forward(200)
+            LED1.value(1)  # Turn on LED for Motor A
+            LED1.value(0)  # Turn off LED for Motor A
+        elif current_state == 'swing_left':
+            print("Swinging left")
+            left(100)
+        elif current_state == 'swing_right':
+            print("Swinging right")
+            right(100)
+        elif current_state == 'turn_left':
+            left(150)
+            print("Going left")
+            time.sleep(1.5)
+            forward(200)
+            time.sleep(0.5)
+            current_state = 'forward'
+        elif current_state == 'turn_right':
+            print("Going right")
+            right(100)
+            time.sleep(1.5)
+            forward(200)
+            time.sleep(0.5)
+            current_state = 'forward'
+        elif current_state == 'forward_bit':
+            forward(200)
+            print("Going bit_forward")
+            time.sleep(0.3)
+            current_state = 'forward'
+            
+        time.sleep(0.05)
+else:
+    forward(200)
+    LED1.value(1)  # Turn on LED for Motor A
