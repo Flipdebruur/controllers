@@ -288,8 +288,6 @@ def Box_pickup(Pin):
 states = ['forward', 'forward_bit', 'swing_right', 'swing_left', 'turn_right', 'turn_left', 'stop']
 current_state = 'forward'
 
-
-
 path = dijkstra(graph, start_node, goal_node)
 
 path_index = 0
@@ -409,8 +407,6 @@ while True:
         time.sleep(0.3)
         current_state = 'forward'
     elif current_state == 'Goal reached':
-        # This state is no longer used, as the goal logic is now
-        # handled entirely within the 'Think' section above.
         Stop()
         time.sleep(0.3)
         path, path_index, current_node, next_node = replan(

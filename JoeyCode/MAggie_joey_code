@@ -1,49 +1,45 @@
+#== OG THE WORKING LINE-FOLLOWING CODE == 
+
 from machine import Pin, PWM
 import time
 from WaveShaker import *
 
-# Speed control using PWM
-ENA = PWM(Pin(25), freq=1000)  # Motor A speed
-ENB = PWM(Pin(33), freq=1000)  # Motor B speed
+# Motor setup
+freq = 1000
+left_motor = PWM(Pin(26), freq=freq)
+left_motor_back = PWM(Pin(27), freq=freq)
+right_motor = PWM(Pin(12), freq=freq)
+right_motor_back = PWM(Pin(14), freq=freq)
 
-# Direction control
-IN1 = Pin(26, Pin.OUT)
-IN2 = Pin(27, Pin.OUT)
-IN3 = Pin(14, Pin.OUT)
-IN4 = Pin(12, Pin.OUT)
+# --- Movement logic ---
+robot_heading = 0  # 0: North, 1: East, 2: South, 3: West
 
-def set_motor(speed, en, in1, in2):
-    en.duty(speed)
-    if speed > 0:
-        in1.value(1)
-        in2.value(0)
-    else:
-        in1.value(0)
-        in2.value(1)
+def set_speed(pwm, duty):
+    pwm.duty(duty)
 
-def forward(vel=700):
-    set_motor(vel, ENA, IN1, IN2)
-    set_motor(vel, ENB, IN3, IN4)
+def forward(vel=500): 
+    set_speed(left_motor, vel)
+    set_speed(left_motor_back, 0)
+    set_speed(right_motor, vel)
+    set_speed(right_motor_back, 0)
 
-def reverse(vel=700):
-    set_motor(-vel, ENA, IN1, IN2)
-    set_motor(-vel, ENB, IN3, IN4)
+def left(vel=500):
+    set_speed(left_motor, 0)
+    set_speed(left_motor_back, vel)
+    set_speed(right_motor, vel)
+    set_speed(right_motor_back, 0)
 
-def left(vel=700):
-    set_motor(-vel, ENA, IN1, IN2)
-    set_motor(vel, ENB, IN3, IN4)
-
-def right(vel=700):
-    set_motor(vel, ENA, IN1, IN2)
-    set_motor(-vel, ENB, IN3, IN4)
+def right(vel=500):
+    set_speed(left_motor, vel)
+    set_speed(left_motor_back, 0)
+    set_speed(right_motor, 0)
+    set_speed(right_motor_back, vel)
 
 def Stop():
-    ENA.duty(0)
-    ENB.duty(0)
-    IN1.value(0)
-    IN2.value(0)
-    IN3.value(0)
-    IN4.value(0)
+    set_speed(left_motor, 0)
+    set_speed(left_motor_back, 0)
+    set_speed(right_motor, 0)
+    set_speed(right_motor_back, 0)
 
 graph = {
     # Top row
@@ -125,8 +121,6 @@ start_node = 'T'  # Example start node
 states = ['forward', 'forward_bit', 'swing_right', 'swing_left', 'turn_right', 'turn_left', 'stop']
 current_state = 'forward'
 
-
-
 path = dijkstra(graph, start_node, goal_node)
 
 path_index = 0
@@ -146,7 +140,7 @@ while True:
 
     ################## Think ###################
 
-    THRESHOLD = 2500 
+    THRESHOLD = 1800 
 
     left_black = Far_left < THRESHOLD
     left_mid_black = left_mid < THRESHOLD
@@ -168,7 +162,6 @@ while True:
     # Sleep to allow sensor reading update
     time.sleep(0.05)
 
-        
     if sum([left_black, left_mid_black, center_black, right_mid_black, right_black]) >= 3:
 
     # Only trigger once per node
